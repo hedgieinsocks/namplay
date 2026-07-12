@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Namplay
+Comment=NAM guitar amp simulator
+Exec=namplay
+Icon=io.github.hedgieinsocks.Namplay
+Type=Application
+Categories=AudioVideo;Audio;Music;

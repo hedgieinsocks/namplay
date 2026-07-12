@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.github.hedgieinsocks.Namplay" path="/io/github/hedgieinsocks/Namplay/">
+    <key name="window-width" type="i">
+      <default>600</default>
+      <summary>Window width in pixels</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>600</default>
+      <summary>Window height in pixels</summary>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Whether the window is maximized</summary>
+    </key>
+
+    <key name="noise-gate-enabled" type="b">
+      <default>false</default>
+      <summary>Noise gate enabled</summary>
+    </key>
+    <key name="noise-gate-threshold" type="d">
+      <range min="-60" max="-30"/>
+      <default>-55</default>
+      <summary>Noise gate threshold in dB</summary>
+    </key>
+
+    <key name="amp-profile-path" type="s">
+      <default>''</default>
+      <summary>Path to the selected amp profile file</summary>
+    </key>
+    <key name="amp-profile-input" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>Amp profile input gain in dB</summary>
+    </key>
+    <key name="amp-profile-output" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>Amp profile output gain in dB</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,169 @@
+using Gtk 4.0;
+using Adw 1;
+
+Gtk.Adjustment noise_gate_threshold_adjustment {
+  lower: -60;
+  upper: -30;
+  value: -55;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment amp_profile_input_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment amp_profile_output_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Adw.ApplicationWindow window {
+  title: "Namplay";
+
+  content: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Adw.PreferencesPage {
+      Adw.PreferencesGroup {
+        Adw.ExpanderRow noise_gate_row {
+          title: "Noise Gate";
+          subtitle: "Suppress the signal below a threshold";
+          show-enable-switch: true;
+          enable-expansion: false;
+
+          Adw.SpinRow noise_gate_threshold_row {
+            title: "Threshold";
+            subtitle: "dBF";
+            numeric: true;
+            digits: 1;
+            adjustment: noise_gate_threshold_adjustment;
+
+            [suffix]
+            Gtk.Button noise_gate_threshold_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale noise_gate_threshold_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: noise_gate_threshold_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+        }
+
+        Adw.ExpanderRow amp_profile_row {
+          title: "Amp Profile";
+          subtitle: "No file selected";
+          enable-expansion: false;
+
+          [suffix]
+          Gtk.Button amp_profile_clear_button {
+            valign: center;
+            icon-name: "edit-clear-symbolic";
+            tooltip-text: "Clear selected file";
+
+            styles ["flat"]
+          }
+
+          [suffix]
+          Gtk.Button amp_profile_button {
+            valign: center;
+            icon-name: "document-open-symbolic";
+            tooltip-text: "Choose amp profile file";
+
+            styles ["flat"]
+          }
+
+          Adw.SpinRow amp_profile_input_row {
+            title: "Input";
+            subtitle: "dB";
+            numeric: true;
+            digits: 1;
+            adjustment: amp_profile_input_adjustment;
+
+            [suffix]
+            Gtk.Button amp_profile_input_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale amp_profile_input_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: amp_profile_input_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow amp_profile_output_row {
+            title: "Output";
+            subtitle: "dB";
+            numeric: true;
+            digits: 1;
+            adjustment: amp_profile_output_adjustment;
+
+            [suffix]
+            Gtk.Button amp_profile_output_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale amp_profile_output_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: amp_profile_output_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+        }
+      }
+    };
+  };
+}

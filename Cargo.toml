@@ -1,0 +1,19 @@
+[package]
+name = "namplay"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "namplay"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }
+libadwaita = { version = "0.9", features = ["v1_4"] }
+gio = "0.22"
+glib = "0.22"
+nam-rs = "0.3"
+jack = "0.13"
+
+[profile.release]
+lto = true

@@ -37,6 +37,19 @@ fn build_ui(app: &adw::Application) {
         &builder,
         &win,
         &settings,
+        "pedal_profile_row",
+        "pedal_profile_button",
+        "pedal_profile_clear_button",
+        "pedal-profile-path",
+        "Choose Pedal Profile",
+        "NAM Profiles",
+        "nam",
+    );
+
+    setup_file_picker_row(
+        &builder,
+        &win,
+        &settings,
         "amp_profile_row",
         "amp_profile_button",
         "amp_profile_clear_button",
@@ -69,6 +82,18 @@ fn build_ui(app: &adw::Application) {
     bind_adjustment(
         &builder,
         &settings,
+        "pedal_profile_input_adjustment",
+        "pedal-profile-input",
+    );
+    bind_adjustment(
+        &builder,
+        &settings,
+        "pedal_profile_output_adjustment",
+        "pedal-profile-output",
+    );
+    bind_adjustment(
+        &builder,
+        &settings,
         "amp_profile_input_adjustment",
         "amp-profile-input",
     );
@@ -85,6 +110,18 @@ fn build_ui(app: &adw::Application) {
         &settings,
         "noise_gate_threshold_reset_button",
         "noise-gate-threshold",
+    );
+    setup_reset_button(
+        &builder,
+        &settings,
+        "pedal_profile_input_reset_button",
+        "pedal-profile-input",
+    );
+    setup_reset_button(
+        &builder,
+        &settings,
+        "pedal_profile_output_reset_button",
+        "pedal-profile-output",
     );
     setup_reset_button(
         &builder,
@@ -116,13 +153,20 @@ fn build_ui(app: &adw::Application) {
     match AudioEngine::new(InitialParams {
         gate_enabled: settings.boolean("noise-gate-enabled"),
         gate_threshold_db: settings.double("noise-gate-threshold") as f32,
+        pedal_path: path_from_settings(&settings, "pedal-profile-path"),
+        pedal_in_gain_db: settings.double("pedal-profile-input") as f32,
+        pedal_out_gain_db: settings.double("pedal-profile-output") as f32,
         in_gain_db: settings.double("amp-profile-input") as f32,
         out_gain_db: settings.double("amp-profile-output") as f32,
         model_path: path_from_settings(&settings, "amp-profile-path"),
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
-        eq_pre_amp: settings.boolean("eq-pre"),
+        eq_pos: match settings.string("eq-position").as_str() {
+            "pre-pedal" => 0,
+            "post-ir" => 2,
+            _ => 1,
+        },
         eq_low_db: settings.double("eq-low") as f32,
         eq_mid_db: settings.double("eq-mid") as f32,
         eq_high_db: settings.double("eq-high") as f32,
@@ -132,6 +176,9 @@ fn build_ui(app: &adw::Application) {
         Ok(engine) => {
             // Keep engine alive inside the 'static closure owned by GSettings
             settings.connect_changed(None, move |s, key| match key {
+                "pedal-profile-path" => engine.load_pedal_model(path_from_settings(s, key)),
+                "pedal-profile-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
+                "pedal-profile-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
                 "amp-profile-path" => engine.load_model(path_from_settings(s, key)),
                 "ir-path" => engine.load_ir(path_from_settings(s, key)),
                 "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
@@ -140,7 +187,11 @@ fn build_ui(app: &adw::Application) {
                 "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
                 "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
                 "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
-                "eq-pre" => engine.set_eq_pre_amp(s.boolean(key)),
+                "eq-position" => engine.set_eq_pos(match s.string(key).as_str() {
+                    "pre-pedal" => 0,
+                    "post-ir" => 2,
+                    _ => 1,
+                }),
                 "eq-low" => engine.set_eq_low_db(s.double(key) as f32),
                 "eq-mid" => engine.set_eq_mid_db(s.double(key) as f32),
                 "eq-high" => engine.set_eq_high_db(s.double(key) as f32),
@@ -161,7 +212,13 @@ fn build_ui(app: &adw::Application) {
     app.add_action(&settings.create_action("collapse-on-launch"));
 
     if settings.boolean("collapse-on-launch") {
-        for id in &["noise_gate_row", "eq_row", "amp_profile_row", "ir_row"] {
+        for id in &[
+            "noise_gate_row",
+            "eq_row",
+            "pedal_profile_row",
+            "amp_profile_row",
+            "ir_row",
+        ] {
             let row: adw::ExpanderRow = builder.object(*id).expect(*id);
             row.set_expanded(false);
         }
@@ -309,26 +366,40 @@ fn setup_reset_button(builder: &gtk4::Builder, settings: &gio::Settings, id: &st
 }
 
 fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
-    let pre_btn: gtk4::ToggleButton = builder.object("eq_pre_button").expect("eq_pre_button");
-    let post_btn: gtk4::ToggleButton = builder.object("eq_post_button").expect("eq_post_button");
+    let pre_pedal_btn: gtk4::ToggleButton = builder
+        .object("eq_pre_pedal_button")
+        .expect("eq_pre_pedal_button");
+    let pre_amp_btn: gtk4::ToggleButton = builder
+        .object("eq_pre_amp_button")
+        .expect("eq_pre_amp_button");
+    let post_ir_btn: gtk4::ToggleButton = builder
+        .object("eq_post_ir_button")
+        .expect("eq_post_ir_button");
 
-    if settings.boolean("eq-pre") {
-        pre_btn.set_active(true);
-    } else {
-        post_btn.set_active(true);
+    match settings.string("eq-position").as_str() {
+        "pre-pedal" => pre_pedal_btn.set_active(true),
+        "post-ir" => post_ir_btn.set_active(true),
+        _ => pre_amp_btn.set_active(true),
     }
 
     let settings_c = settings.clone();
-    pre_btn.connect_toggled(move |btn| {
+    pre_pedal_btn.connect_toggled(move |btn| {
         if btn.is_active() {
-            let _ = settings_c.set_boolean("eq-pre", true);
+            let _ = settings_c.set_string("eq-position", "pre-pedal");
         }
     });
 
     let settings_c = settings.clone();
-    post_btn.connect_toggled(move |btn| {
+    pre_amp_btn.connect_toggled(move |btn| {
         if btn.is_active() {
-            let _ = settings_c.set_boolean("eq-pre", false);
+            let _ = settings_c.set_string("eq-position", "pre-amp");
+        }
+    });
+
+    let settings_c = settings.clone();
+    post_ir_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            let _ = settings_c.set_string("eq-position", "post-ir");
         }
     });
 }

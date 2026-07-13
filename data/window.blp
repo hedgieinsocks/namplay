@@ -9,6 +9,22 @@ Gtk.Adjustment noise_gate_threshold_adjustment {
   page-increment: 1;
 }
 
+Gtk.Adjustment pedal_profile_input_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment pedal_profile_output_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
 Gtk.Adjustment amp_profile_input_adjustment {
   lower: -20;
   upper: 20;
@@ -152,20 +168,24 @@ Adw.ApplicationWindow window {
 
           Adw.ActionRow {
             title: "Position";
-            subtitle: "Pre amp or post IR";
 
             [suffix]
             Gtk.Box {
               valign: center;
               styles ["linked"]
 
-              Gtk.ToggleButton eq_pre_button {
-                label: "Pre";
+              Gtk.ToggleButton eq_pre_pedal_button {
+                label: "Pre Pedal";
               }
 
-              Gtk.ToggleButton eq_post_button {
-                label: "Post";
-                group: eq_pre_button;
+              Gtk.ToggleButton eq_pre_amp_button {
+                label: "Pre Amp";
+                group: eq_pre_pedal_button;
+              }
+
+              Gtk.ToggleButton eq_post_ir_button {
+                label: "Post IR";
+                group: eq_pre_pedal_button;
               }
             }
           }
@@ -328,6 +348,96 @@ Adw.ApplicationWindow window {
               orientation: horizontal;
               hexpand: true;
               adjustment: eq_lp_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+        }
+
+        Adw.ExpanderRow pedal_profile_row {
+          title: "Pedal Profile";
+          subtitle: "No file selected";
+          enable-expansion: false;
+
+          [suffix]
+          Gtk.Button pedal_profile_clear_button {
+            valign: center;
+            icon-name: "edit-clear-symbolic";
+            tooltip-text: "Clear selected file";
+
+            styles ["flat"]
+          }
+
+          [suffix]
+          Gtk.Button pedal_profile_button {
+            valign: center;
+            icon-name: "document-open-symbolic";
+            tooltip-text: "Choose pedal profile file";
+
+            styles ["flat"]
+          }
+
+          Adw.SpinRow pedal_profile_input_row {
+            title: "Input";
+            subtitle: "dB";
+            numeric: true;
+            digits: 1;
+            adjustment: pedal_profile_input_adjustment;
+
+            [suffix]
+            Gtk.Button pedal_profile_input_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale pedal_profile_input_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: pedal_profile_input_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow pedal_profile_output_row {
+            title: "Output";
+            subtitle: "dB";
+            numeric: true;
+            digits: 1;
+            adjustment: pedal_profile_output_adjustment;
+
+            [suffix]
+            Gtk.Button pedal_profile_output_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale pedal_profile_output_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: pedal_profile_output_adjustment;
               margin-start: 12;
               margin-end: 12;
               margin-top: 6;

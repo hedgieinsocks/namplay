@@ -28,6 +28,21 @@
       <summary>Noise gate threshold in dB</summary>
     </key>
 
+    <key name="pedal-profile-path" type="s">
+      <default>''</default>
+      <summary>Path to the selected pedal profile file</summary>
+    </key>
+    <key name="pedal-profile-input" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>Pedal profile input gain in dB</summary>
+    </key>
+    <key name="pedal-profile-output" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>Pedal profile output gain in dB</summary>
+    </key>
+
     <key name="amp-profile-path" type="s">
       <default>''</default>
       <summary>Path to the selected amp profile file</summary>
@@ -56,9 +71,14 @@
       <default>false</default>
       <summary>EQ enabled</summary>
     </key>
-    <key name="eq-pre" type="b">
-      <default>true</default>
-      <summary>EQ position: pre or post</summary>
+    <key name="eq-position" type="s">
+      <choices>
+        <choice value="pre-pedal"/>
+        <choice value="pre-amp"/>
+        <choice value="post-ir"/>
+      </choices>
+      <default>'pre-amp'</default>
+      <summary>EQ position in the signal chain</summary>
     </key>
     <key name="eq-low" type="d">
       <range min="-20" max="20"/>

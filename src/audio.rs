@@ -246,6 +246,10 @@ impl Eq {
 }
 
 struct NamProcessor {
+    pedal_model_rx: mpsc::Receiver<Option<Model>>,
+    current_pedal_model: Option<Model>,
+    pedal_in_gain: Arc<AtomicU32>,
+    pedal_out_gain: Arc<AtomicU32>,
     model_rx: mpsc::Receiver<Option<Model>>,
     current_model: Option<Model>,
     ir_rx: mpsc::Receiver<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
@@ -262,9 +266,8 @@ struct NamProcessor {
     last_gate_threshold_db: f32,
     eq_l: Option<Eq>,
     eq_r: Option<Eq>,
-    current_eq_pre_amp: bool,
     eq_enabled: Arc<AtomicBool>,
-    eq_pre_amp: Arc<AtomicBool>,
+    eq_pos: Arc<AtomicU32>,
     eq_low_db: Arc<AtomicU32>,
     eq_mid_db: Arc<AtomicU32>,
     eq_high_db: Arc<AtomicU32>,
@@ -284,6 +287,9 @@ struct NamProcessor {
 
 impl ProcessHandler for NamProcessor {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
+        while let Ok(new_model) = self.pedal_model_rx.try_recv() {
+            self.current_pedal_model = new_model;
+        }
         while let Ok(new_model) = self.model_rx.try_recv() {
             self.current_model = new_model;
         }
@@ -311,18 +317,19 @@ impl ProcessHandler for NamProcessor {
                 gate_enabled.then(|| NoiseGate::new(gate_threshold_db, self.sample_rate));
         }
 
+        let pedal_in_gain = f32::from_bits(self.pedal_in_gain.load(Ordering::Relaxed));
+        let pedal_out_gain = f32::from_bits(self.pedal_out_gain.load(Ordering::Relaxed));
         let in_gain = f32::from_bits(self.in_gain.load(Ordering::Relaxed));
         let out_gain = f32::from_bits(self.out_gain.load(Ordering::Relaxed));
         let ir_level = f32::from_bits(self.ir_level.load(Ordering::Relaxed));
 
         let eq_enabled = self.eq_enabled.load(Ordering::Relaxed);
-        let eq_pre_amp = self.eq_pre_amp.load(Ordering::Relaxed);
+        let eq_pos = self.eq_pos.load(Ordering::Relaxed);
         let eq_low_db = f32::from_bits(self.eq_low_db.load(Ordering::Relaxed));
         let eq_mid_db = f32::from_bits(self.eq_mid_db.load(Ordering::Relaxed));
         let eq_high_db = f32::from_bits(self.eq_high_db.load(Ordering::Relaxed));
         let eq_hp_freq = f32::from_bits(self.eq_hp_freq.load(Ordering::Relaxed));
         let eq_lp_freq = f32::from_bits(self.eq_lp_freq.load(Ordering::Relaxed));
-        self.current_eq_pre_amp = eq_pre_amp;
         let eq_params_changed = eq_low_db != self.last_eq_low_db
             || eq_mid_db != self.last_eq_mid_db
             || eq_high_db != self.last_eq_high_db
@@ -367,72 +374,93 @@ impl ProcessHandler for NamProcessor {
         let out_l = self.out_port_l.as_mut_slice(ps);
         let out_r = self.out_port_r.as_mut_slice(ps);
 
-        match &mut self.current_model {
-            Some(model) => {
-                for (o, &i) in out_l.iter_mut().zip(input) {
-                    let mut s = match &mut self.noise_gate {
-                        Some(g) => g.process_sample(i),
-                        None => i,
-                    };
-                    if self.current_eq_pre_amp {
-                        if let Some(eq) = &mut self.eq_l {
-                            s = eq.process_sample(s);
-                        }
+        if self.current_pedal_model.is_none() && self.current_model.is_none() {
+            for s in out_l.iter_mut() {
+                *s = 0.0;
+            }
+            for s in out_r.iter_mut() {
+                *s = 0.0;
+            }
+        } else {
+            // Gate + optional pre-pedal EQ
+            for (o, &i) in out_l.iter_mut().zip(input) {
+                let mut s = match &mut self.noise_gate {
+                    Some(g) => g.process_sample(i),
+                    None => i,
+                };
+                if eq_pos == 0 {
+                    if let Some(eq) = &mut self.eq_l {
+                        s = eq.process_sample(s);
                     }
-                    *o = s * in_gain;
                 }
-                model.process_buffer(out_l);
-                let n = out_l.len().min(self.conv_buf.len());
-                let stereo_ir = if let Some(ir_l) = &mut self.current_ir_l {
-                    self.conv_buf[..n].copy_from_slice(&out_l[..n]);
-                    let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
-                    for s in out_l[..n].iter_mut() {
+                *o = s;
+            }
+            if let Some(pedal) = &mut self.current_pedal_model {
+                for s in out_l.iter_mut() {
+                    *s *= pedal_in_gain;
+                }
+                pedal.process_buffer(out_l);
+                for s in out_l.iter_mut() {
+                    *s *= pedal_out_gain;
+                }
+            }
+            // Optional pre-amp EQ
+            if eq_pos == 1 {
+                if let Some(eq) = &mut self.eq_l {
+                    for s in out_l.iter_mut() {
+                        *s = eq.process_sample(*s);
+                    }
+                }
+            }
+            if let Some(amp) = &mut self.current_model {
+                for s in out_l.iter_mut() {
+                    *s *= in_gain;
+                }
+                amp.process_buffer(out_l);
+            }
+            let n = out_l.len().min(self.conv_buf.len());
+            let stereo_ir = if let Some(ir_l) = &mut self.current_ir_l {
+                self.conv_buf[..n].copy_from_slice(&out_l[..n]);
+                let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
+                for s in out_l[..n].iter_mut() {
+                    *s *= ir_level;
+                }
+                if let Some(ir_r) = &mut self.current_ir_r {
+                    let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
+                    for s in out_r[..n].iter_mut() {
                         *s *= ir_level;
                     }
-                    if let Some(ir_r) = &mut self.current_ir_r {
-                        let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
-                        for s in out_r[..n].iter_mut() {
-                            *s *= ir_level;
-                        }
-                        true
-                    } else {
-                        false
-                    }
+                    true
                 } else {
                     false
-                };
-                if !self.current_eq_pre_amp {
-                    if let Some(eq) = &mut self.eq_l {
-                        for s in out_l.iter_mut() {
+                }
+            } else {
+                false
+            };
+            // Optional post-IR EQ
+            if eq_pos == 2 {
+                if let Some(eq) = &mut self.eq_l {
+                    for s in out_l.iter_mut() {
+                        *s = eq.process_sample(*s);
+                    }
+                }
+            }
+            for s in out_l.iter_mut() {
+                *s *= out_gain;
+            }
+            if stereo_ir {
+                if eq_pos == 2 {
+                    if let Some(eq) = &mut self.eq_r {
+                        for s in out_r.iter_mut() {
                             *s = eq.process_sample(*s);
                         }
                     }
                 }
-                for s in out_l.iter_mut() {
+                for s in out_r.iter_mut() {
                     *s *= out_gain;
                 }
-                if stereo_ir {
-                    if !self.current_eq_pre_amp {
-                        if let Some(eq) = &mut self.eq_r {
-                            for s in out_r.iter_mut() {
-                                *s = eq.process_sample(*s);
-                            }
-                        }
-                    }
-                    for s in out_r.iter_mut() {
-                        *s *= out_gain;
-                    }
-                } else {
-                    out_r.copy_from_slice(out_l);
-                }
-            }
-            None => {
-                for s in out_l.iter_mut() {
-                    *s = 0.0;
-                }
-                for s in out_r.iter_mut() {
-                    *s = 0.0;
-                }
+            } else {
+                out_r.copy_from_slice(out_l);
             }
         }
 
@@ -443,13 +471,16 @@ impl ProcessHandler for NamProcessor {
 pub struct InitialParams {
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
+    pub pedal_path: Option<String>,
+    pub pedal_in_gain_db: f32,
+    pub pedal_out_gain_db: f32,
     pub in_gain_db: f32,
     pub out_gain_db: f32,
     pub model_path: Option<String>,
     pub ir_path: Option<String>,
     pub ir_level_db: f32,
     pub eq_enabled: bool,
-    pub eq_pre_amp: bool,
+    pub eq_pos: u32,
     pub eq_low_db: f32,
     pub eq_mid_db: f32,
     pub eq_high_db: f32,
@@ -459,6 +490,9 @@ pub struct InitialParams {
 
 pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
+    pedal_model_tx: mpsc::Sender<Option<Model>>,
+    pedal_in_gain: Arc<AtomicU32>,
+    pedal_out_gain: Arc<AtomicU32>,
     model_tx: mpsc::Sender<Option<Model>>,
     ir_tx: mpsc::Sender<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
     in_gain: Arc<AtomicU32>,
@@ -467,7 +501,7 @@ pub struct AudioEngine {
     gate_enabled: Arc<AtomicBool>,
     gate_threshold_db: Arc<AtomicU32>,
     eq_enabled: Arc<AtomicBool>,
-    eq_pre_amp: Arc<AtomicBool>,
+    eq_pos: Arc<AtomicU32>,
     eq_low_db: Arc<AtomicU32>,
     eq_mid_db: Arc<AtomicU32>,
     eq_high_db: Arc<AtomicU32>,
@@ -495,17 +529,24 @@ impl AudioEngine {
             .register_port("output_r", AudioOut::default())
             .map_err(|e| format!("register output_r port: {e}"))?;
 
+        let (pedal_model_tx, pedal_model_rx) = mpsc::channel();
         let (model_tx, model_rx) = mpsc::channel();
         let (ir_tx, ir_rx) =
             mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
+        let pedal_in_gain = Arc::new(AtomicU32::new(
+            db_to_gain(params.pedal_in_gain_db).to_bits(),
+        ));
+        let pedal_out_gain = Arc::new(AtomicU32::new(
+            db_to_gain(params.pedal_out_gain_db).to_bits(),
+        ));
         let in_gain = Arc::new(AtomicU32::new(db_to_gain(params.in_gain_db).to_bits()));
         let out_gain = Arc::new(AtomicU32::new(db_to_gain(params.out_gain_db).to_bits()));
         let ir_level = Arc::new(AtomicU32::new(db_to_gain(params.ir_level_db).to_bits()));
         let gate_enabled = Arc::new(AtomicBool::new(params.gate_enabled));
         let gate_threshold_db = Arc::new(AtomicU32::new(params.gate_threshold_db.to_bits()));
         let eq_enabled = Arc::new(AtomicBool::new(params.eq_enabled));
-        let eq_pre_amp = Arc::new(AtomicBool::new(params.eq_pre_amp));
+        let eq_pos = Arc::new(AtomicU32::new(params.eq_pos));
         let eq_low_db = Arc::new(AtomicU32::new(params.eq_low_db.to_bits()));
         let eq_mid_db = Arc::new(AtomicU32::new(params.eq_mid_db.to_bits()));
         let eq_high_db = Arc::new(AtomicU32::new(params.eq_high_db.to_bits()));
@@ -530,6 +571,10 @@ impl AudioEngine {
         let initial_eq_r = params.eq_enabled.then(make_eq);
 
         let processor = NamProcessor {
+            pedal_model_rx,
+            current_pedal_model: None,
+            pedal_in_gain: Arc::clone(&pedal_in_gain),
+            pedal_out_gain: Arc::clone(&pedal_out_gain),
             model_rx,
             current_model: None,
             ir_rx,
@@ -546,9 +591,8 @@ impl AudioEngine {
             last_gate_threshold_db: params.gate_threshold_db,
             eq_l: initial_eq_l,
             eq_r: initial_eq_r,
-            current_eq_pre_amp: params.eq_pre_amp,
             eq_enabled: Arc::clone(&eq_enabled),
-            eq_pre_amp: Arc::clone(&eq_pre_amp),
+            eq_pos: Arc::clone(&eq_pos),
             eq_low_db: Arc::clone(&eq_low_db),
             eq_mid_db: Arc::clone(&eq_mid_db),
             eq_high_db: Arc::clone(&eq_high_db),
@@ -572,6 +616,9 @@ impl AudioEngine {
 
         let engine = AudioEngine {
             _client: active_client,
+            pedal_model_tx,
+            pedal_in_gain,
+            pedal_out_gain,
             model_tx,
             ir_tx,
             in_gain,
@@ -580,7 +627,7 @@ impl AudioEngine {
             gate_enabled,
             gate_threshold_db,
             eq_enabled,
-            eq_pre_amp,
+            eq_pos,
             eq_low_db,
             eq_mid_db,
             eq_high_db,
@@ -590,10 +637,32 @@ impl AudioEngine {
             block_size,
         };
 
+        engine.load_pedal_model(params.pedal_path);
         engine.load_model(params.model_path);
         engine.load_ir(params.ir_path);
 
         Ok(engine)
+    }
+
+    pub fn load_pedal_model(&self, path: Option<String>) {
+        let tx = self.pedal_model_tx.clone();
+        std::thread::spawn(move || {
+            let model = path.and_then(|p| {
+                let nm = NamModel::from_file(&p).ok()?;
+                Model::from_nam(&nm).ok()
+            });
+            let _ = tx.send(model);
+        });
+    }
+
+    pub fn set_pedal_in_gain_db(&self, db: f32) {
+        self.pedal_in_gain
+            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn set_pedal_out_gain_db(&self, db: f32) {
+        self.pedal_out_gain
+            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
     }
 
     pub fn load_model(&self, path: Option<String>) {
@@ -654,8 +723,8 @@ impl AudioEngine {
         self.eq_enabled.store(enabled, Ordering::Relaxed);
     }
 
-    pub fn set_eq_pre_amp(&self, pre: bool) {
-        self.eq_pre_amp.store(pre, Ordering::Relaxed);
+    pub fn set_eq_pos(&self, pos: u32) {
+        self.eq_pos.store(pos, Ordering::Relaxed);
     }
 
     pub fn set_eq_low_db(&self, db: f32) {

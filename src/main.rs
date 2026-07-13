@@ -158,6 +158,24 @@ fn build_ui(app: &adw::Application) {
         glib::Propagation::Proceed
     });
 
+    let about_action = gio::ActionEntry::builder("about")
+        .activate(|app: &adw::Application, _, _| {
+            let about = adw::AboutWindow::builder()
+                .application_name("Namplay")
+                .application_icon(APP_ID)
+                .version("0.1.0")
+                .developers(["hedgieinsocks"])
+                .license_type(gtk4::License::MitX11)
+                .website("https://github.com/hedgieinsocks/namplay")
+                .issue_url("https://github.com/hedgieinsocks/namplay/issues")
+                .modal(true)
+                .build();
+            about.set_transient_for(app.active_window().as_ref());
+            about.present();
+        })
+        .build();
+    app.add_action_entries([about_action]);
+
     win.present();
 }
 

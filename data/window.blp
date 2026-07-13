@@ -73,12 +73,27 @@ Gtk.Adjustment eq_lp_adjustment {
   page-increment: 500;
 }
 
+menu primary_menu {
+  item {
+    label: "About Namplay";
+    action: "app.about";
+  }
+}
+
 Adw.ApplicationWindow window {
   title: "Namplay";
 
   content: Adw.ToolbarView {
     [top]
-    Adw.HeaderBar {}
+    Adw.HeaderBar {
+      [end]
+      Gtk.MenuButton {
+        icon-name: "open-menu-symbolic";
+        menu-model: primary_menu;
+        primary: true;
+        tooltip-text: "Main Menu";
+      }
+    }
 
     content: Adw.PreferencesPage {
       Adw.PreferencesGroup {

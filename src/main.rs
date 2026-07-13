@@ -158,6 +158,15 @@ fn build_ui(app: &adw::Application) {
         glib::Propagation::Proceed
     });
 
+    app.add_action(&settings.create_action("collapse-on-launch"));
+
+    if settings.boolean("collapse-on-launch") {
+        for id in &["noise_gate_row", "eq_row", "amp_profile_row", "ir_row"] {
+            let row: adw::ExpanderRow = builder.object(*id).expect(*id);
+            row.set_expanded(false);
+        }
+    }
+
     let about_action = gio::ActionEntry::builder("about")
         .activate(|app: &adw::Application, _, _| {
             let about = adw::AboutWindow::builder()

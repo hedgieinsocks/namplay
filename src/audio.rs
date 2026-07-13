@@ -496,7 +496,8 @@ impl AudioEngine {
             .map_err(|e| format!("register output_r port: {e}"))?;
 
         let (model_tx, model_rx) = mpsc::channel();
-        let (ir_tx, ir_rx) = mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
+        let (ir_tx, ir_rx) =
+            mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
         let in_gain = Arc::new(AtomicU32::new(db_to_gain(params.in_gain_db).to_bits()));
         let out_gain = Arc::new(AtomicU32::new(db_to_gain(params.out_gain_db).to_bits()));
@@ -515,14 +516,16 @@ impl AudioEngine {
             .gate_enabled
             .then(|| NoiseGate::new(params.gate_threshold_db, sample_rate));
 
-        let make_eq = || Eq::new(
-            params.eq_low_db,
-            params.eq_mid_db,
-            params.eq_high_db,
-            params.eq_hp_freq,
-            params.eq_lp_freq,
-            sample_rate as f32,
-        );
+        let make_eq = || {
+            Eq::new(
+                params.eq_low_db,
+                params.eq_mid_db,
+                params.eq_high_db,
+                params.eq_hp_freq,
+                params.eq_lp_freq,
+                sample_rate as f32,
+            )
+        };
         let initial_eq_l = params.eq_enabled.then(make_eq);
         let initial_eq_r = params.eq_enabled.then(make_eq);
 

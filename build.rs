@@ -8,7 +8,12 @@ fn main() {
     let ui = out.join("window.ui");
 
     let status = Command::new("blueprint-compiler")
-        .args(["compile", blp.to_str().unwrap(), "--output", ui.to_str().unwrap()])
+        .args([
+            "compile",
+            blp.to_str().unwrap(),
+            "--output",
+            ui.to_str().unwrap(),
+        ])
         .status()
         .expect("blueprint-compiler not found");
     assert!(status.success(), "blueprint-compiler failed");

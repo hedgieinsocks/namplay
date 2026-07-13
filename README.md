@@ -8,6 +8,6 @@ A very minimal GTK4/Libadwaita app for running [Neural Amp Modeler](https://gith
 
 [MIT](LICENSE)
 
-### AI Transparency & Attribution
+### AI Transparency & Attributions
 
-This project was **vibe-coded** with the assistance of Claude. It became possible thanks to https://github.com/OpenSauce/nam-rs library.
+This project is **vibe-coded** for personal use with the assistance of Claude. It became possible thanks to https://github.com/OpenSauce/nam-rs library. The app icon was made by [Freepik](https://www.flaticon.com/authors/freepik) from [Flaticon](https://www.flaticon.com/).

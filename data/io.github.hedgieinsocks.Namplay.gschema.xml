@@ -19,7 +19,7 @@
       <summary>Noise gate enabled</summary>
     </key>
     <key name="noise-gate-threshold" type="d">
-      <range min="-60" max="-30"/>
+      <range min="-80" max="-20"/>
       <default>-55</default>
       <summary>Noise gate threshold in dB</summary>
     </key>
@@ -46,6 +46,40 @@
       <range min="-20" max="20"/>
       <default>0</default>
       <summary>Amp profile output gain in dB</summary>
+    </key>
+
+    <key name="eq-enabled" type="b">
+      <default>false</default>
+      <summary>EQ enabled</summary>
+    </key>
+    <key name="eq-pre" type="b">
+      <default>true</default>
+      <summary>EQ position: pre or post</summary>
+    </key>
+    <key name="eq-low" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>EQ low band gain in dB</summary>
+    </key>
+    <key name="eq-mid" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>EQ mid band gain in dB</summary>
+    </key>
+    <key name="eq-high" type="d">
+      <range min="-20" max="20"/>
+      <default>0</default>
+      <summary>EQ high band gain in dB</summary>
+    </key>
+    <key name="eq-hp" type="d">
+      <range min="20" max="120"/>
+      <default>70</default>
+      <summary>EQ high-pass filter cutoff in Hz</summary>
+    </key>
+    <key name="eq-lp" type="d">
+      <range min="5000" max="16000"/>
+      <default>7000</default>
+      <summary>EQ low-pass filter cutoff in Hz</summary>
     </key>
   </schema>
 </schemalist>

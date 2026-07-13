@@ -12,9 +12,7 @@ const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
 
 fn main() {
-    let app = adw::Application::builder()
-        .application_id(APP_ID)
-        .build();
+    let app = adw::Application::builder().application_id(APP_ID).build();
 
     app.connect_activate(build_ui);
 
@@ -62,17 +60,58 @@ fn build_ui(app: &adw::Application) {
     );
 
     bind_toggle(&builder, &settings, "noise_gate_row", "noise-gate-enabled");
-    bind_adjustment(&builder, &settings, "noise_gate_threshold_adjustment", "noise-gate-threshold");
-    bind_adjustment(&builder, &settings, "amp_profile_input_adjustment", "amp-profile-input");
-    bind_adjustment(&builder, &settings, "amp_profile_output_adjustment", "amp-profile-output");
+    bind_adjustment(
+        &builder,
+        &settings,
+        "noise_gate_threshold_adjustment",
+        "noise-gate-threshold",
+    );
+    bind_adjustment(
+        &builder,
+        &settings,
+        "amp_profile_input_adjustment",
+        "amp-profile-input",
+    );
+    bind_adjustment(
+        &builder,
+        &settings,
+        "amp_profile_output_adjustment",
+        "amp-profile-output",
+    );
     bind_adjustment(&builder, &settings, "ir_level_adjustment", "ir-level");
 
-    setup_reset_button(&builder, &settings, "noise_gate_threshold_reset_button", "noise-gate-threshold");
-    setup_reset_button(&builder, &settings, "amp_profile_input_reset_button", "amp-profile-input");
-    setup_reset_button(&builder, &settings, "amp_profile_output_reset_button", "amp-profile-output");
+    setup_reset_button(
+        &builder,
+        &settings,
+        "noise_gate_threshold_reset_button",
+        "noise-gate-threshold",
+    );
+    setup_reset_button(
+        &builder,
+        &settings,
+        "amp_profile_input_reset_button",
+        "amp-profile-input",
+    );
+    setup_reset_button(
+        &builder,
+        &settings,
+        "amp_profile_output_reset_button",
+        "amp-profile-output",
+    );
     setup_reset_button(&builder, &settings, "ir_level_reset_button", "ir-level");
 
-    // Start audio engine with values already persisted in GSettings
+    bind_toggle(&builder, &settings, "eq_row", "eq-enabled");
+    bind_adjustment(&builder, &settings, "eq_hp_adjustment", "eq-hp");
+    bind_adjustment(&builder, &settings, "eq_low_adjustment", "eq-low");
+    bind_adjustment(&builder, &settings, "eq_mid_adjustment", "eq-mid");
+    bind_adjustment(&builder, &settings, "eq_high_adjustment", "eq-high");
+    bind_adjustment(&builder, &settings, "eq_lp_adjustment", "eq-lp");
+    setup_reset_button(&builder, &settings, "eq_hp_reset_button", "eq-hp");
+    setup_reset_button(&builder, &settings, "eq_low_reset_button", "eq-low");
+    setup_reset_button(&builder, &settings, "eq_mid_reset_button", "eq-mid");
+    setup_reset_button(&builder, &settings, "eq_high_reset_button", "eq-high");
+    setup_reset_button(&builder, &settings, "eq_lp_reset_button", "eq-lp");
+    setup_eq_position(&builder, &settings);
 
     match AudioEngine::new(InitialParams {
         gate_enabled: settings.boolean("noise-gate-enabled"),
@@ -82,20 +121,32 @@ fn build_ui(app: &adw::Application) {
         model_path: path_from_settings(&settings, "amp-profile-path"),
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
+        eq_enabled: settings.boolean("eq-enabled"),
+        eq_pre_amp: settings.boolean("eq-pre"),
+        eq_low_db: settings.double("eq-low") as f32,
+        eq_mid_db: settings.double("eq-mid") as f32,
+        eq_high_db: settings.double("eq-high") as f32,
+        eq_hp_freq: settings.double("eq-hp") as f32,
+        eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
             // Keep engine alive inside the 'static closure owned by GSettings
-            settings.connect_changed(None, move |s, key| {
-                match key {
-                    "amp-profile-path" => engine.load_model(path_from_settings(s, key)),
-                    "ir-path" => engine.load_ir(path_from_settings(s, key)),
-                    "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
-                    "amp-profile-input" => engine.set_in_gain_db(s.double(key) as f32),
-                    "amp-profile-output" => engine.set_out_gain_db(s.double(key) as f32),
-                    "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
-                    "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
-                    _ => {}
-                }
+            settings.connect_changed(None, move |s, key| match key {
+                "amp-profile-path" => engine.load_model(path_from_settings(s, key)),
+                "ir-path" => engine.load_ir(path_from_settings(s, key)),
+                "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
+                "amp-profile-input" => engine.set_in_gain_db(s.double(key) as f32),
+                "amp-profile-output" => engine.set_out_gain_db(s.double(key) as f32),
+                "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
+                "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
+                "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
+                "eq-pre" => engine.set_eq_pre_amp(s.boolean(key)),
+                "eq-low" => engine.set_eq_low_db(s.double(key) as f32),
+                "eq-mid" => engine.set_eq_mid_db(s.double(key) as f32),
+                "eq-high" => engine.set_eq_high_db(s.double(key) as f32),
+                "eq-hp" => engine.set_eq_hp_freq(s.double(key) as f32),
+                "eq-lp" => engine.set_eq_lp_freq(s.double(key) as f32),
+                _ => {}
             });
         }
         Err(e) => eprintln!("audio unavailable: {e}"),
@@ -128,7 +179,11 @@ fn save_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
 
 fn path_from_settings(settings: &gio::Settings, key: &str) -> Option<String> {
     let p = settings.string(key);
-    if p.is_empty() { None } else { Some(p.to_string()) }
+    if p.is_empty() {
+        None
+    } else {
+        Some(p.to_string())
+    }
 }
 
 fn setup_file_picker_row(
@@ -223,5 +278,30 @@ fn setup_reset_button(builder: &gtk4::Builder, settings: &gio::Settings, id: &st
     let key = key.to_owned();
     btn.connect_clicked(move |_| {
         settings.reset(&key);
+    });
+}
+
+fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
+    let pre_btn: gtk4::ToggleButton = builder.object("eq_pre_button").expect("eq_pre_button");
+    let post_btn: gtk4::ToggleButton = builder.object("eq_post_button").expect("eq_post_button");
+
+    if settings.boolean("eq-pre") {
+        pre_btn.set_active(true);
+    } else {
+        post_btn.set_active(true);
+    }
+
+    let settings_c = settings.clone();
+    pre_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            let _ = settings_c.set_boolean("eq-pre", true);
+        }
+    });
+
+    let settings_c = settings.clone();
+    post_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            let _ = settings_c.set_boolean("eq-pre", false);
+        }
     });
 }

@@ -2,8 +2,8 @@ using Gtk 4.0;
 using Adw 1;
 
 Gtk.Adjustment noise_gate_threshold_adjustment {
-  lower: -60;
-  upper: -30;
+  lower: -80;
+  upper: -20;
   value: -55;
   step-increment: 0.1;
   page-increment: 1;
@@ -31,6 +31,46 @@ Gtk.Adjustment ir_level_adjustment {
   value: -18;
   step-increment: 0.1;
   page-increment: 1;
+}
+
+Gtk.Adjustment eq_low_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment eq_mid_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment eq_high_adjustment {
+  lower: -20;
+  upper: 20;
+  value: 0;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
+Gtk.Adjustment eq_hp_adjustment {
+  lower: 20;
+  upper: 120;
+  value: 70;
+  step-increment: 1;
+  page-increment: 10;
+}
+
+Gtk.Adjustment eq_lp_adjustment {
+  lower: 5000;
+  upper: 16000;
+  value: 7000;
+  step-increment: 50;
+  page-increment: 500;
 }
 
 Adw.ApplicationWindow window {
@@ -74,6 +114,198 @@ Adw.ApplicationWindow window {
               orientation: horizontal;
               hexpand: true;
               adjustment: noise_gate_threshold_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+        }
+
+        Adw.ExpanderRow eq_row {
+          title: "Equalizer";
+          subtitle: "3-band equalizer with high/low pass";
+          show-enable-switch: true;
+          enable-expansion: false;
+
+          Adw.ActionRow {
+            title: "Position";
+            subtitle: "Pre amp or post IR";
+
+            [suffix]
+            Gtk.Box {
+              valign: center;
+              styles ["linked"]
+
+              Gtk.ToggleButton eq_pre_button {
+                label: "Pre";
+              }
+
+              Gtk.ToggleButton eq_post_button {
+                label: "Post";
+                group: eq_pre_button;
+              }
+            }
+          }
+
+          Adw.SpinRow eq_hp_row {
+            title: "High Pass";
+            subtitle: "Hz";
+            numeric: true;
+            digits: 0;
+            adjustment: eq_hp_adjustment;
+
+            [suffix]
+            Gtk.Button eq_hp_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale eq_hp_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: eq_hp_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow eq_low_row {
+            title: "Low";
+            subtitle: "dB · 150 Hz";
+            numeric: true;
+            digits: 1;
+            adjustment: eq_low_adjustment;
+
+            [suffix]
+            Gtk.Button eq_low_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale eq_low_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: eq_low_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow eq_mid_row {
+            title: "Mid";
+            subtitle: "dB · 425 Hz";
+            numeric: true;
+            digits: 1;
+            adjustment: eq_mid_adjustment;
+
+            [suffix]
+            Gtk.Button eq_mid_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale eq_mid_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: eq_mid_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow eq_high_row {
+            title: "High";
+            subtitle: "dB · 1800 Hz";
+            numeric: true;
+            digits: 1;
+            adjustment: eq_high_adjustment;
+
+            [suffix]
+            Gtk.Button eq_high_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale eq_high_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: eq_high_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+
+          Adw.SpinRow eq_lp_row {
+            title: "Low Pass";
+            subtitle: "Hz";
+            numeric: true;
+            digits: 0;
+            adjustment: eq_lp_adjustment;
+
+            [suffix]
+            Gtk.Button eq_lp_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale eq_lp_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: eq_lp_adjustment;
               margin-start: 12;
               margin-end: 12;
               margin-top: 6;

@@ -248,8 +248,9 @@ impl Eq {
 struct NamProcessor {
     model_rx: mpsc::Receiver<Option<Model>>,
     current_model: Option<Model>,
-    ir_rx: mpsc::Receiver<Option<FFTConvolver<f32>>>,
-    current_ir: Option<FFTConvolver<f32>>,
+    ir_rx: mpsc::Receiver<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
+    current_ir_l: Option<FFTConvolver<f32>>,
+    current_ir_r: Option<FFTConvolver<f32>>,
     conv_buf: Vec<f32>,
     noise_gate: Option<NoiseGate>,
     in_gain: Arc<AtomicU32>,
@@ -259,7 +260,8 @@ struct NamProcessor {
     gate_threshold_db: Arc<AtomicU32>,
     last_gate_enabled: bool,
     last_gate_threshold_db: f32,
-    eq: Option<Eq>,
+    eq_l: Option<Eq>,
+    eq_r: Option<Eq>,
     current_eq_pre_amp: bool,
     eq_enabled: Arc<AtomicBool>,
     eq_pre_amp: Arc<AtomicBool>,
@@ -276,7 +278,8 @@ struct NamProcessor {
     last_eq_lp_freq: f32,
     sample_rate: u32,
     in_port: jack::Port<AudioIn>,
-    out_port: jack::Port<AudioOut>,
+    out_port_l: jack::Port<AudioOut>,
+    out_port_r: jack::Port<AudioOut>,
 }
 
 impl ProcessHandler for NamProcessor {
@@ -285,7 +288,16 @@ impl ProcessHandler for NamProcessor {
             self.current_model = new_model;
         }
         while let Ok(new_ir) = self.ir_rx.try_recv() {
-            self.current_ir = new_ir;
+            match new_ir {
+                Some((l, r)) => {
+                    self.current_ir_l = Some(l);
+                    self.current_ir_r = r;
+                }
+                None => {
+                    self.current_ir_l = None;
+                    self.current_ir_r = None;
+                }
+            }
         }
 
         let gate_enabled = self.gate_enabled.load(Ordering::Relaxed);
@@ -324,11 +336,23 @@ impl ProcessHandler for NamProcessor {
             self.last_eq_hp_freq = eq_hp_freq;
             self.last_eq_lp_freq = eq_lp_freq;
             if !eq_enabled {
-                self.eq = None;
-            } else if let Some(eq) = &mut self.eq {
+                self.eq_l = None;
+                self.eq_r = None;
+            } else if let Some(eq) = &mut self.eq_l {
                 eq.update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
+                if let Some(eq) = &mut self.eq_r {
+                    eq.update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
+                }
             } else {
-                self.eq = Some(Eq::new(
+                self.eq_l = Some(Eq::new(
+                    eq_low_db,
+                    eq_mid_db,
+                    eq_high_db,
+                    eq_hp_freq,
+                    eq_lp_freq,
+                    self.sample_rate as f32,
+                ));
+                self.eq_r = Some(Eq::new(
                     eq_low_db,
                     eq_mid_db,
                     eq_high_db,
@@ -340,44 +364,73 @@ impl ProcessHandler for NamProcessor {
         }
 
         let input = self.in_port.as_slice(ps);
-        let output = self.out_port.as_mut_slice(ps);
+        let out_l = self.out_port_l.as_mut_slice(ps);
+        let out_r = self.out_port_r.as_mut_slice(ps);
 
         match &mut self.current_model {
             Some(model) => {
-                for (o, &i) in output.iter_mut().zip(input) {
+                for (o, &i) in out_l.iter_mut().zip(input) {
                     let mut s = match &mut self.noise_gate {
                         Some(g) => g.process_sample(i),
                         None => i,
                     };
                     if self.current_eq_pre_amp {
-                        if let Some(eq) = &mut self.eq {
+                        if let Some(eq) = &mut self.eq_l {
                             s = eq.process_sample(s);
                         }
                     }
                     *o = s * in_gain;
                 }
-                model.process_buffer(output);
-                if let Some(ir) = &mut self.current_ir {
-                    let n = output.len().min(self.conv_buf.len());
-                    self.conv_buf[..n].copy_from_slice(&output[..n]);
-                    let _ = ir.process(&self.conv_buf[..n], &mut output[..n]);
-                    for s in output[..n].iter_mut() {
+                model.process_buffer(out_l);
+                let n = out_l.len().min(self.conv_buf.len());
+                let stereo_ir = if let Some(ir_l) = &mut self.current_ir_l {
+                    self.conv_buf[..n].copy_from_slice(&out_l[..n]);
+                    let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
+                    for s in out_l[..n].iter_mut() {
                         *s *= ir_level;
                     }
-                }
+                    if let Some(ir_r) = &mut self.current_ir_r {
+                        let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
+                        for s in out_r[..n].iter_mut() {
+                            *s *= ir_level;
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if !self.current_eq_pre_amp {
-                    if let Some(eq) = &mut self.eq {
-                        for s in output.iter_mut() {
+                    if let Some(eq) = &mut self.eq_l {
+                        for s in out_l.iter_mut() {
                             *s = eq.process_sample(*s);
                         }
                     }
                 }
-                for s in output.iter_mut() {
+                for s in out_l.iter_mut() {
                     *s *= out_gain;
+                }
+                if stereo_ir {
+                    if !self.current_eq_pre_amp {
+                        if let Some(eq) = &mut self.eq_r {
+                            for s in out_r.iter_mut() {
+                                *s = eq.process_sample(*s);
+                            }
+                        }
+                    }
+                    for s in out_r.iter_mut() {
+                        *s *= out_gain;
+                    }
+                } else {
+                    out_r.copy_from_slice(out_l);
                 }
             }
             None => {
-                for s in output.iter_mut() {
+                for s in out_l.iter_mut() {
+                    *s = 0.0;
+                }
+                for s in out_r.iter_mut() {
                     *s = 0.0;
                 }
             }
@@ -407,7 +460,7 @@ pub struct InitialParams {
 pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
     model_tx: mpsc::Sender<Option<Model>>,
-    ir_tx: mpsc::Sender<Option<FFTConvolver<f32>>>,
+    ir_tx: mpsc::Sender<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
     in_gain: Arc<AtomicU32>,
     out_gain: Arc<AtomicU32>,
     ir_level: Arc<AtomicU32>,
@@ -435,12 +488,15 @@ impl AudioEngine {
         let in_port = client
             .register_port("input", AudioIn::default())
             .map_err(|e| format!("register input port: {e}"))?;
-        let out_port = client
-            .register_port("output", AudioOut::default())
-            .map_err(|e| format!("register output port: {e}"))?;
+        let out_port_l = client
+            .register_port("output_l", AudioOut::default())
+            .map_err(|e| format!("register output_l port: {e}"))?;
+        let out_port_r = client
+            .register_port("output_r", AudioOut::default())
+            .map_err(|e| format!("register output_r port: {e}"))?;
 
         let (model_tx, model_rx) = mpsc::channel();
-        let (ir_tx, ir_rx) = mpsc::channel::<Option<FFTConvolver<f32>>>();
+        let (ir_tx, ir_rx) = mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
         let in_gain = Arc::new(AtomicU32::new(db_to_gain(params.in_gain_db).to_bits()));
         let out_gain = Arc::new(AtomicU32::new(db_to_gain(params.out_gain_db).to_bits()));
@@ -459,22 +515,23 @@ impl AudioEngine {
             .gate_enabled
             .then(|| NoiseGate::new(params.gate_threshold_db, sample_rate));
 
-        let initial_eq = params.eq_enabled.then(|| {
-            Eq::new(
-                params.eq_low_db,
-                params.eq_mid_db,
-                params.eq_high_db,
-                params.eq_hp_freq,
-                params.eq_lp_freq,
-                sample_rate as f32,
-            )
-        });
+        let make_eq = || Eq::new(
+            params.eq_low_db,
+            params.eq_mid_db,
+            params.eq_high_db,
+            params.eq_hp_freq,
+            params.eq_lp_freq,
+            sample_rate as f32,
+        );
+        let initial_eq_l = params.eq_enabled.then(make_eq);
+        let initial_eq_r = params.eq_enabled.then(make_eq);
 
         let processor = NamProcessor {
             model_rx,
             current_model: None,
             ir_rx,
-            current_ir: None,
+            current_ir_l: None,
+            current_ir_r: None,
             conv_buf: vec![0.0f32; block_size],
             noise_gate: initial_gate,
             in_gain: Arc::clone(&in_gain),
@@ -484,7 +541,8 @@ impl AudioEngine {
             gate_threshold_db: Arc::clone(&gate_threshold_db),
             last_gate_enabled: params.gate_enabled,
             last_gate_threshold_db: params.gate_threshold_db,
-            eq: initial_eq,
+            eq_l: initial_eq_l,
+            eq_r: initial_eq_r,
             current_eq_pre_amp: params.eq_pre_amp,
             eq_enabled: Arc::clone(&eq_enabled),
             eq_pre_amp: Arc::clone(&eq_pre_amp),
@@ -501,7 +559,8 @@ impl AudioEngine {
             last_eq_lp_freq: params.eq_lp_freq,
             sample_rate,
             in_port,
-            out_port,
+            out_port_l,
+            out_port_r,
         };
 
         let active_client = client
@@ -551,10 +610,14 @@ impl AudioEngine {
         let block_size = self.block_size;
         std::thread::spawn(move || {
             let conv = path.and_then(|p| {
-                let samples = load_wav_mono(&p, sample_rate)?;
-                let mut c = FFTConvolver::<f32>::default();
-                c.init(block_size, &samples).ok()?;
-                Some(c)
+                let (l_samples, r_samples) = load_wav_channels(&p, sample_rate)?;
+                let mut cl = FFTConvolver::<f32>::default();
+                cl.init(block_size, &l_samples).ok()?;
+                let cr = r_samples.and_then(|r| {
+                    let mut c = FFTConvolver::<f32>::default();
+                    c.init(block_size, &r).ok().map(|_| c)
+                });
+                Some((cl, cr))
             });
             let _ = tx.send(conv);
         });
@@ -613,7 +676,7 @@ impl AudioEngine {
     }
 }
 
-fn load_wav_mono(path: &str, jack_sample_rate: u32) -> Option<Vec<f32>> {
+fn load_wav_channels(path: &str, jack_sample_rate: u32) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
@@ -634,12 +697,13 @@ fn load_wav_mono(path: &str, jack_sample_rate: u32) -> Option<Vec<f32>> {
                 .collect()
         }
     };
-    // Use only the first (left) channel for stereo IRs
-    Some(if channels == 1 {
-        samples
+    if channels == 1 {
+        Some((samples, None))
     } else {
-        samples.into_iter().step_by(channels).collect()
-    })
+        let left: Vec<f32> = samples.chunks(channels).map(|c| c[0]).collect();
+        let right: Vec<f32> = samples.chunks(channels).map(|c| c[1]).collect();
+        Some((left, Some(right)))
+    }
 }
 
 fn db_to_gain(db: f32) -> f32 {

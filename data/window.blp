@@ -25,6 +25,14 @@ Gtk.Adjustment amp_profile_output_adjustment {
   page-increment: 1;
 }
 
+Gtk.Adjustment ir_level_adjustment {
+  lower: -20;
+  upper: 20;
+  value: -18;
+  step-increment: 0.1;
+  page-increment: 1;
+}
+
 Adw.ApplicationWindow window {
   title: "Namplay";
 
@@ -42,7 +50,7 @@ Adw.ApplicationWindow window {
 
           Adw.SpinRow noise_gate_threshold_row {
             title: "Threshold";
-            subtitle: "dBF";
+            subtitle: "dB";
             numeric: true;
             digits: 1;
             adjustment: noise_gate_threshold_adjustment;
@@ -156,6 +164,63 @@ Adw.ApplicationWindow window {
               orientation: horizontal;
               hexpand: true;
               adjustment: amp_profile_output_adjustment;
+              margin-start: 12;
+              margin-end: 12;
+              margin-top: 6;
+              margin-bottom: 12;
+            };
+          }
+        }
+
+        Adw.ExpanderRow ir_row {
+          title: "Impulse Response";
+          subtitle: "No file selected";
+          enable-expansion: false;
+
+          [suffix]
+          Gtk.Button ir_clear_button {
+            valign: center;
+            icon-name: "edit-clear-symbolic";
+            tooltip-text: "Clear selected file";
+
+            styles ["flat"]
+          }
+
+          [suffix]
+          Gtk.Button ir_button {
+            valign: center;
+            icon-name: "document-open-symbolic";
+            tooltip-text: "Choose impulse response file";
+
+            styles ["flat"]
+          }
+
+          Adw.SpinRow ir_level_row {
+            title: "Level";
+            subtitle: "dB";
+            numeric: true;
+            digits: 1;
+            adjustment: ir_level_adjustment;
+
+            [suffix]
+            Gtk.Button ir_level_reset_button {
+              valign: center;
+              icon-name: "edit-undo-symbolic";
+              tooltip-text: "Reset to default";
+
+              styles ["flat"]
+            }
+          }
+
+          Gtk.ListBoxRow {
+            activatable: false;
+            selectable: false;
+            focusable: false;
+
+            child: Gtk.Scale ir_level_scale {
+              orientation: horizontal;
+              hexpand: true;
+              adjustment: ir_level_adjustment;
               margin-start: 12;
               margin-end: 12;
               margin-top: 6;

@@ -6,7 +6,7 @@
       <summary>Window width in pixels</summary>
     </key>
     <key name="window-height" type="i">
-      <default>600</default>
+      <default>800</default>
       <summary>Window height in pixels</summary>
     </key>
     <key name="window-maximized" type="b">
@@ -27,6 +27,15 @@
     <key name="amp-profile-path" type="s">
       <default>''</default>
       <summary>Path to the selected amp profile file</summary>
+    </key>
+    <key name="ir-path" type="s">
+      <default>''</default>
+      <summary>Path to the selected impulse response file</summary>
+    </key>
+    <key name="ir-level" type="d">
+      <range min="-20" max="20"/>
+      <default>-18</default>
+      <summary>Impulse response output level in dB</summary>
     </key>
     <key name="amp-profile-input" type="d">
       <range min="-20" max="20"/>

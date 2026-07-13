@@ -48,36 +48,48 @@ fn build_ui(app: &adw::Application) {
         "nam",
     );
 
+    setup_file_picker_row(
+        &builder,
+        &win,
+        &settings,
+        "ir_row",
+        "ir_button",
+        "ir_clear_button",
+        "ir-path",
+        "Choose Impulse Response",
+        "WAV Files",
+        "wav",
+    );
+
     bind_toggle(&builder, &settings, "noise_gate_row", "noise-gate-enabled");
     bind_adjustment(&builder, &settings, "noise_gate_threshold_adjustment", "noise-gate-threshold");
     bind_adjustment(&builder, &settings, "amp_profile_input_adjustment", "amp-profile-input");
     bind_adjustment(&builder, &settings, "amp_profile_output_adjustment", "amp-profile-output");
+    bind_adjustment(&builder, &settings, "ir_level_adjustment", "ir-level");
 
     setup_reset_button(&builder, &settings, "noise_gate_threshold_reset_button", "noise-gate-threshold");
     setup_reset_button(&builder, &settings, "amp_profile_input_reset_button", "amp-profile-input");
     setup_reset_button(&builder, &settings, "amp_profile_output_reset_button", "amp-profile-output");
+    setup_reset_button(&builder, &settings, "ir_level_reset_button", "ir-level");
 
     // Start audio engine with values already persisted in GSettings
-    let model_path = {
-        let p = settings.string("amp-profile-path");
-        if p.is_empty() { None } else { Some(p.to_string()) }
-    };
 
     match AudioEngine::new(InitialParams {
         gate_enabled: settings.boolean("noise-gate-enabled"),
         gate_threshold_db: settings.double("noise-gate-threshold") as f32,
         in_gain_db: settings.double("amp-profile-input") as f32,
         out_gain_db: settings.double("amp-profile-output") as f32,
-        model_path,
+        model_path: path_from_settings(&settings, "amp-profile-path"),
+        ir_path: path_from_settings(&settings, "ir-path"),
+        ir_level_db: settings.double("ir-level") as f32,
     }) {
         Ok(engine) => {
             // Keep engine alive inside the 'static closure owned by GSettings
             settings.connect_changed(None, move |s, key| {
                 match key {
-                    "amp-profile-path" => {
-                        let p = s.string(key);
-                        engine.load_model(if p.is_empty() { None } else { Some(p.to_string()) });
-                    }
+                    "amp-profile-path" => engine.load_model(path_from_settings(s, key)),
+                    "ir-path" => engine.load_ir(path_from_settings(s, key)),
+                    "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
                     "amp-profile-input" => engine.set_in_gain_db(s.double(key) as f32),
                     "amp-profile-output" => engine.set_out_gain_db(s.double(key) as f32),
                     "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
@@ -112,6 +124,11 @@ fn save_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
         let _ = settings.set_int("window-width", width);
         let _ = settings.set_int("window-height", height);
     }
+}
+
+fn path_from_settings(settings: &gio::Settings, key: &str) -> Option<String> {
+    let p = settings.string(key);
+    if p.is_empty() { None } else { Some(p.to_string()) }
 }
 
 fn setup_file_picker_row(

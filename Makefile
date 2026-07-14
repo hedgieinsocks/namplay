@@ -30,7 +30,7 @@ build:
 run: build
 	@mkdir -p $(SCHEMA_DEV)
 	glib-compile-schemas data --targetdir=$(SCHEMA_DEV)
-	GSETTINGS_SCHEMA_DIR=$(SCHEMA_DEV) ./target/debug/$(BIN)
+	GSETTINGS_SCHEMA_DIR=$(SCHEMA_DEV) RUST_LOG=debug ./target/debug/$(BIN)
 
 release:
 	cargo build --release

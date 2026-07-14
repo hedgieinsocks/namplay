@@ -3,9 +3,32 @@ use std::sync::{
     mpsc, Arc,
 };
 
+use log::{debug, error, warn};
+
 use fft_convolver::FFTConvolver;
+
+const EQ_LOW_FREQ: f32 = 150.0;
+const EQ_MID_FREQ: f32 = 425.0;
+const EQ_HIGH_FREQ: f32 = 1800.0;
+const EQ_MID_Q_CUT: f32 = 1.5;
+const EQ_MID_Q_BOOST: f32 = 0.7;
+
 use jack::{AudioIn, AudioOut, Client, ClientOptions, Control, ProcessHandler, ProcessScope};
 use nam_rs::{Model, NamModel};
+
+struct AtomicF32(AtomicU32);
+
+impl AtomicF32 {
+    fn new(val: f32) -> Self {
+        AtomicF32(AtomicU32::new(val.to_bits()))
+    }
+    fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+    fn set(&self, val: f32) {
+        self.0.store(val.to_bits(), Ordering::Relaxed)
+    }
+}
 
 struct NoiseGate {
     open_threshold: f32,
@@ -230,10 +253,17 @@ impl Eq {
 
     fn update(&mut self, low_db: f32, mid_db: f32, high_db: f32, hp_freq: f32, lp_freq: f32) {
         self.hp.set_highpass(hp_freq, self.sample_rate);
-        self.low.set_low_shelf(low_db, 150.0, self.sample_rate);
-        let mid_q = if mid_db < 0.0 { 1.5 } else { 0.7 };
-        self.mid.set_peaking(mid_db, 425.0, mid_q, self.sample_rate);
-        self.high.set_high_shelf(high_db, 1800.0, self.sample_rate);
+        self.low
+            .set_low_shelf(low_db, EQ_LOW_FREQ, self.sample_rate);
+        let mid_q = if mid_db < 0.0 {
+            EQ_MID_Q_CUT
+        } else {
+            EQ_MID_Q_BOOST
+        };
+        self.mid
+            .set_peaking(mid_db, EQ_MID_FREQ, mid_q, self.sample_rate);
+        self.high
+            .set_high_shelf(high_db, EQ_HIGH_FREQ, self.sample_rate);
         self.lp.set_lowpass(lp_freq, self.sample_rate);
     }
 
@@ -248,8 +278,8 @@ impl Eq {
 struct NamProcessor {
     pedal_model_rx: mpsc::Receiver<Option<Model>>,
     current_pedal_model: Option<Model>,
-    pedal_in_gain: Arc<AtomicU32>,
-    pedal_out_gain: Arc<AtomicU32>,
+    pedal_in_gain: Arc<AtomicF32>,
+    pedal_out_gain: Arc<AtomicF32>,
     model_rx: mpsc::Receiver<Option<Model>>,
     current_model: Option<Model>,
     ir_rx: mpsc::Receiver<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
@@ -257,23 +287,24 @@ struct NamProcessor {
     current_ir_r: Option<FFTConvolver<f32>>,
     conv_buf: Vec<f32>,
     noise_gate: Option<NoiseGate>,
-    in_gain: Arc<AtomicU32>,
-    out_gain: Arc<AtomicU32>,
-    ir_level: Arc<AtomicU32>,
+    in_gain: Arc<AtomicF32>,
+    out_gain: Arc<AtomicF32>,
+    ir_level: Arc<AtomicF32>,
     gate_enabled: Arc<AtomicBool>,
-    gate_threshold_db: Arc<AtomicU32>,
+    gate_threshold_db: Arc<AtomicF32>,
     last_gate_enabled: bool,
     last_gate_threshold_db: f32,
     eq_l: Option<Eq>,
     eq_r: Option<Eq>,
     eq_enabled: Arc<AtomicBool>,
     eq_pos: Arc<AtomicU32>,
-    eq_low_db: Arc<AtomicU32>,
-    eq_mid_db: Arc<AtomicU32>,
-    eq_high_db: Arc<AtomicU32>,
-    eq_hp_freq: Arc<AtomicU32>,
-    eq_lp_freq: Arc<AtomicU32>,
+    eq_low_db: Arc<AtomicF32>,
+    eq_mid_db: Arc<AtomicF32>,
+    eq_high_db: Arc<AtomicF32>,
+    eq_hp_freq: Arc<AtomicF32>,
+    eq_lp_freq: Arc<AtomicF32>,
     last_eq_enabled: bool,
+    last_eq_pos: u32,
     last_eq_low_db: f32,
     last_eq_mid_db: f32,
     last_eq_high_db: f32,
@@ -307,7 +338,7 @@ impl ProcessHandler for NamProcessor {
         }
 
         let gate_enabled = self.gate_enabled.load(Ordering::Relaxed);
-        let gate_threshold_db = f32::from_bits(self.gate_threshold_db.load(Ordering::Relaxed));
+        let gate_threshold_db = self.gate_threshold_db.get();
         if gate_enabled != self.last_gate_enabled
             || gate_threshold_db != self.last_gate_threshold_db
         {
@@ -317,26 +348,28 @@ impl ProcessHandler for NamProcessor {
                 gate_enabled.then(|| NoiseGate::new(gate_threshold_db, self.sample_rate));
         }
 
-        let pedal_in_gain = f32::from_bits(self.pedal_in_gain.load(Ordering::Relaxed));
-        let pedal_out_gain = f32::from_bits(self.pedal_out_gain.load(Ordering::Relaxed));
-        let in_gain = f32::from_bits(self.in_gain.load(Ordering::Relaxed));
-        let out_gain = f32::from_bits(self.out_gain.load(Ordering::Relaxed));
-        let ir_level = f32::from_bits(self.ir_level.load(Ordering::Relaxed));
+        let pedal_in_gain = self.pedal_in_gain.get();
+        let pedal_out_gain = self.pedal_out_gain.get();
+        let in_gain = self.in_gain.get();
+        let out_gain = self.out_gain.get();
+        let ir_level = self.ir_level.get();
 
         let eq_enabled = self.eq_enabled.load(Ordering::Relaxed);
         let eq_pos = self.eq_pos.load(Ordering::Relaxed);
-        let eq_low_db = f32::from_bits(self.eq_low_db.load(Ordering::Relaxed));
-        let eq_mid_db = f32::from_bits(self.eq_mid_db.load(Ordering::Relaxed));
-        let eq_high_db = f32::from_bits(self.eq_high_db.load(Ordering::Relaxed));
-        let eq_hp_freq = f32::from_bits(self.eq_hp_freq.load(Ordering::Relaxed));
-        let eq_lp_freq = f32::from_bits(self.eq_lp_freq.load(Ordering::Relaxed));
+        let eq_low_db = self.eq_low_db.get();
+        let eq_mid_db = self.eq_mid_db.get();
+        let eq_high_db = self.eq_high_db.get();
+        let eq_hp_freq = self.eq_hp_freq.get();
+        let eq_lp_freq = self.eq_lp_freq.get();
         let eq_params_changed = eq_low_db != self.last_eq_low_db
             || eq_mid_db != self.last_eq_mid_db
             || eq_high_db != self.last_eq_high_db
             || eq_hp_freq != self.last_eq_hp_freq
-            || eq_lp_freq != self.last_eq_lp_freq;
+            || eq_lp_freq != self.last_eq_lp_freq
+            || eq_pos != self.last_eq_pos;
         if eq_enabled != self.last_eq_enabled || (eq_enabled && eq_params_changed) {
             self.last_eq_enabled = eq_enabled;
+            self.last_eq_pos = eq_pos;
             self.last_eq_low_db = eq_low_db;
             self.last_eq_mid_db = eq_mid_db;
             self.last_eq_high_db = eq_high_db;
@@ -491,22 +524,22 @@ pub struct InitialParams {
 pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
     pedal_model_tx: mpsc::Sender<Option<Model>>,
-    pedal_in_gain: Arc<AtomicU32>,
-    pedal_out_gain: Arc<AtomicU32>,
+    pedal_in_gain: Arc<AtomicF32>,
+    pedal_out_gain: Arc<AtomicF32>,
     model_tx: mpsc::Sender<Option<Model>>,
     ir_tx: mpsc::Sender<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
-    in_gain: Arc<AtomicU32>,
-    out_gain: Arc<AtomicU32>,
-    ir_level: Arc<AtomicU32>,
+    in_gain: Arc<AtomicF32>,
+    out_gain: Arc<AtomicF32>,
+    ir_level: Arc<AtomicF32>,
     gate_enabled: Arc<AtomicBool>,
-    gate_threshold_db: Arc<AtomicU32>,
+    gate_threshold_db: Arc<AtomicF32>,
     eq_enabled: Arc<AtomicBool>,
     eq_pos: Arc<AtomicU32>,
-    eq_low_db: Arc<AtomicU32>,
-    eq_mid_db: Arc<AtomicU32>,
-    eq_high_db: Arc<AtomicU32>,
-    eq_hp_freq: Arc<AtomicU32>,
-    eq_lp_freq: Arc<AtomicU32>,
+    eq_low_db: Arc<AtomicF32>,
+    eq_mid_db: Arc<AtomicF32>,
+    eq_high_db: Arc<AtomicF32>,
+    eq_hp_freq: Arc<AtomicF32>,
+    eq_lp_freq: Arc<AtomicF32>,
     sample_rate: u32,
     block_size: usize,
 }
@@ -518,6 +551,7 @@ impl AudioEngine {
 
         let sample_rate = client.sample_rate() as u32;
         let block_size = client.buffer_size() as usize;
+        debug!("JACK: state=connected sample_rate={sample_rate} block_size={block_size}");
 
         let in_port = client
             .register_port("input", AudioIn::default())
@@ -534,24 +568,49 @@ impl AudioEngine {
         let (ir_tx, ir_rx) =
             mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
-        let pedal_in_gain = Arc::new(AtomicU32::new(
-            db_to_gain(params.pedal_in_gain_db).to_bits(),
-        ));
-        let pedal_out_gain = Arc::new(AtomicU32::new(
-            db_to_gain(params.pedal_out_gain_db).to_bits(),
-        ));
-        let in_gain = Arc::new(AtomicU32::new(db_to_gain(params.in_gain_db).to_bits()));
-        let out_gain = Arc::new(AtomicU32::new(db_to_gain(params.out_gain_db).to_bits()));
-        let ir_level = Arc::new(AtomicU32::new(db_to_gain(params.ir_level_db).to_bits()));
+        let pedal_in_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_in_gain_db)));
+        let pedal_out_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_out_gain_db)));
+        let in_gain = Arc::new(AtomicF32::new(db_to_gain(params.in_gain_db)));
+        let out_gain = Arc::new(AtomicF32::new(db_to_gain(params.out_gain_db)));
+        let ir_level = Arc::new(AtomicF32::new(db_to_gain(params.ir_level_db)));
         let gate_enabled = Arc::new(AtomicBool::new(params.gate_enabled));
-        let gate_threshold_db = Arc::new(AtomicU32::new(params.gate_threshold_db.to_bits()));
+        let gate_threshold_db = Arc::new(AtomicF32::new(params.gate_threshold_db));
         let eq_enabled = Arc::new(AtomicBool::new(params.eq_enabled));
         let eq_pos = Arc::new(AtomicU32::new(params.eq_pos));
-        let eq_low_db = Arc::new(AtomicU32::new(params.eq_low_db.to_bits()));
-        let eq_mid_db = Arc::new(AtomicU32::new(params.eq_mid_db.to_bits()));
-        let eq_high_db = Arc::new(AtomicU32::new(params.eq_high_db.to_bits()));
-        let eq_hp_freq = Arc::new(AtomicU32::new(params.eq_hp_freq.to_bits()));
-        let eq_lp_freq = Arc::new(AtomicU32::new(params.eq_lp_freq.to_bits()));
+        let eq_low_db = Arc::new(AtomicF32::new(params.eq_low_db));
+        let eq_mid_db = Arc::new(AtomicF32::new(params.eq_mid_db));
+        let eq_high_db = Arc::new(AtomicF32::new(params.eq_high_db));
+        let eq_hp_freq = Arc::new(AtomicF32::new(params.eq_hp_freq));
+        let eq_lp_freq = Arc::new(AtomicF32::new(params.eq_lp_freq));
+
+        debug!(
+            "pedal: in={}dB out={}dB",
+            params.pedal_in_gain_db, params.pedal_out_gain_db
+        );
+        debug!(
+            "amp: in={}dB out={}dB",
+            params.in_gain_db, params.out_gain_db
+        );
+        debug!("IR: level={}dB", params.ir_level_db);
+        debug!(
+            "noise gate: state={} threshold={}dB",
+            if params.gate_enabled { "on" } else { "off" },
+            params.gate_threshold_db
+        );
+        debug!(
+            "EQ: state={} position={} low={}dB mid={}dB high={}dB hp={}Hz lp={}Hz",
+            if params.eq_enabled { "on" } else { "off" },
+            match params.eq_pos {
+                0 => "pre-pedal",
+                2 => "post-IR",
+                _ => "pre-amp",
+            },
+            params.eq_low_db,
+            params.eq_mid_db,
+            params.eq_high_db,
+            params.eq_hp_freq,
+            params.eq_lp_freq,
+        );
 
         let initial_gate = params
             .gate_enabled
@@ -599,6 +658,7 @@ impl AudioEngine {
             eq_hp_freq: Arc::clone(&eq_hp_freq),
             eq_lp_freq: Arc::clone(&eq_lp_freq),
             last_eq_enabled: params.eq_enabled,
+            last_eq_pos: params.eq_pos,
             last_eq_low_db: params.eq_low_db,
             last_eq_mid_db: params.eq_mid_db,
             last_eq_high_db: params.eq_high_db,
@@ -647,31 +707,59 @@ impl AudioEngine {
     pub fn load_pedal_model(&self, path: Option<String>) {
         let tx = self.pedal_model_tx.clone();
         std::thread::spawn(move || {
-            let model = path.and_then(|p| {
-                let nm = NamModel::from_file(&p).ok()?;
-                Model::from_nam(&nm).ok()
-            });
+            let model = match path {
+                None => {
+                    debug!("pedal model cleared");
+                    None
+                }
+                Some(p) => {
+                    debug!("loading pedal model: {p}");
+                    let m = NamModel::from_file(&p)
+                        .ok()
+                        .and_then(|nm| Model::from_nam(&nm).ok());
+                    if m.is_some() {
+                        debug!("pedal model loaded: {p}");
+                    } else {
+                        error!("failed to load pedal model: {p}");
+                    }
+                    m
+                }
+            };
             let _ = tx.send(model);
         });
     }
 
     pub fn set_pedal_in_gain_db(&self, db: f32) {
-        self.pedal_in_gain
-            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+        debug!("pedal in={db}dB");
+        self.pedal_in_gain.set(db_to_gain(db));
     }
 
     pub fn set_pedal_out_gain_db(&self, db: f32) {
-        self.pedal_out_gain
-            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+        debug!("pedal out={db}dB");
+        self.pedal_out_gain.set(db_to_gain(db));
     }
 
     pub fn load_model(&self, path: Option<String>) {
         let tx = self.model_tx.clone();
         std::thread::spawn(move || {
-            let model = path.and_then(|p| {
-                let nm = NamModel::from_file(&p).ok()?;
-                Model::from_nam(&nm).ok()
-            });
+            let model = match path {
+                None => {
+                    debug!("amp model cleared");
+                    None
+                }
+                Some(p) => {
+                    debug!("loading amp model: {p}");
+                    let m = NamModel::from_file(&p)
+                        .ok()
+                        .and_then(|nm| Model::from_nam(&nm).ok());
+                    if m.is_some() {
+                        debug!("amp model loaded: {p}");
+                    } else {
+                        error!("failed to load amp model: {p}");
+                    }
+                    m
+                }
+            };
             let _ = tx.send(model);
         });
     }
@@ -681,70 +769,98 @@ impl AudioEngine {
         let sample_rate = self.sample_rate;
         let block_size = self.block_size;
         std::thread::spawn(move || {
-            let conv = path.and_then(|p| {
-                let (l_samples, r_samples) = load_wav_channels(&p, sample_rate)?;
-                let mut cl = FFTConvolver::<f32>::default();
-                cl.init(block_size, &l_samples).ok()?;
-                let cr = r_samples.and_then(|r| {
-                    let mut c = FFTConvolver::<f32>::default();
-                    c.init(block_size, &r).ok().map(|_| c)
-                });
-                Some((cl, cr))
-            });
+            let conv = match path {
+                None => {
+                    debug!("IR cleared");
+                    None
+                }
+                Some(p) => {
+                    debug!("loading IR: {p}");
+                    let result =
+                        load_wav_channels(&p, sample_rate).and_then(|(l_samples, r_samples)| {
+                            let mut cl = FFTConvolver::<f32>::default();
+                            cl.init(block_size, &l_samples).ok()?;
+                            let cr = r_samples.and_then(|r| {
+                                let mut c = FFTConvolver::<f32>::default();
+                                c.init(block_size, &r).ok().map(|_| c)
+                            });
+                            Some((cl, cr))
+                        });
+                    if result.is_some() {
+                        debug!("IR loaded: {p}");
+                    } else {
+                        error!("failed to load IR: {p}");
+                    }
+                    result
+                }
+            };
             let _ = tx.send(conv);
         });
     }
 
     pub fn set_ir_level_db(&self, db: f32) {
-        self.ir_level
-            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+        debug!("IR: level={db}dB");
+        self.ir_level.set(db_to_gain(db));
     }
 
     pub fn set_in_gain_db(&self, db: f32) {
-        self.in_gain
-            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+        debug!("amp: in={db}dB");
+        self.in_gain.set(db_to_gain(db));
     }
 
     pub fn set_out_gain_db(&self, db: f32) {
-        self.out_gain
-            .store(db_to_gain(db).to_bits(), Ordering::Relaxed);
+        debug!("amp: out={db}dB");
+        self.out_gain.set(db_to_gain(db));
     }
 
     pub fn set_gate_enabled(&self, enabled: bool) {
+        debug!("noise gate: state={}", if enabled { "on" } else { "off" });
         self.gate_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn set_gate_threshold_db(&self, db: f32) {
-        self.gate_threshold_db
-            .store(db.to_bits(), Ordering::Relaxed);
+        debug!("noise gate: threshold={db}dB");
+        self.gate_threshold_db.set(db);
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {
+        debug!("EQ: state={}", if enabled { "on" } else { "off" });
         self.eq_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn set_eq_pos(&self, pos: u32) {
+        let name = match pos {
+            0 => "pre-pedal",
+            2 => "post-IR",
+            _ => "pre-amp",
+        };
+        debug!("EQ: position={name}");
         self.eq_pos.store(pos, Ordering::Relaxed);
     }
 
     pub fn set_eq_low_db(&self, db: f32) {
-        self.eq_low_db.store(db.to_bits(), Ordering::Relaxed);
+        debug!("EQ: low={db}dB");
+        self.eq_low_db.set(db);
     }
 
     pub fn set_eq_mid_db(&self, db: f32) {
-        self.eq_mid_db.store(db.to_bits(), Ordering::Relaxed);
+        debug!("EQ: mid={db}dB");
+        self.eq_mid_db.set(db);
     }
 
     pub fn set_eq_high_db(&self, db: f32) {
-        self.eq_high_db.store(db.to_bits(), Ordering::Relaxed);
+        debug!("EQ: high={db}dB");
+        self.eq_high_db.set(db);
     }
 
     pub fn set_eq_hp_freq(&self, hz: f32) {
-        self.eq_hp_freq.store(hz.to_bits(), Ordering::Relaxed);
+        debug!("EQ: high-pass={hz}Hz");
+        self.eq_hp_freq.set(hz);
     }
 
     pub fn set_eq_lp_freq(&self, hz: f32) {
-        self.eq_lp_freq.store(hz.to_bits(), Ordering::Relaxed);
+        debug!("EQ: low-pass={hz}Hz");
+        self.eq_lp_freq.set(hz);
     }
 }
 
@@ -752,8 +868,8 @@ fn load_wav_channels(path: &str, jack_sample_rate: u32) -> Option<(Vec<f32>, Opt
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
-        eprintln!(
-            "namplay: IR sample rate {} != JACK rate {}, pitch may differ",
+        warn!(
+            "IR sample rate {} != JACK rate {}, pitch may differ",
             spec.sample_rate, jack_sample_rate
         );
     }

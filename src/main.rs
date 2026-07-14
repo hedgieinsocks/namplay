@@ -5,6 +5,7 @@ use std::path::Path;
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
+use log::error;
 
 use audio::{AudioEngine, InitialParams};
 
@@ -12,6 +13,7 @@ const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
 
 fn main() {
+    env_logger::init();
     let app = adw::Application::builder().application_id(APP_ID).build();
 
     app.connect_activate(build_ui);
@@ -200,7 +202,7 @@ fn build_ui(app: &adw::Application) {
                 _ => {}
             });
         }
-        Err(e) => eprintln!("audio unavailable: {e}"),
+        Err(e) => error!("audio unavailable: {e}"),
     }
 
     let settings_clone = settings.clone();

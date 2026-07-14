@@ -1,6 +1,6 @@
 # Namplay
 
-GTK4/Libadwaita app for GNOME desktop to run [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) A2 profiles via PipeWire (JACK).
+GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) profiles via PipeWire (JACK).
 
 ![Screenshot](assets/screenshot.png)
 

@@ -224,13 +224,34 @@ fn build_ui(app: &adw::Application) {
         }
     }
 
+    let browse_action = gio::ActionEntry::builder("browse-profiles")
+        .activate(|app: &adw::Application, _, _| {
+            gtk4::UriLauncher::new("https://www.tone3000.com/search").launch(
+                app.active_window().as_ref(),
+                None::<&gio::Cancellable>,
+                |_| {},
+            );
+        })
+        .build();
+    let usage_action = gio::ActionEntry::builder("usage-guide")
+        .activate(|app: &adw::Application, _, _| {
+            gtk4::UriLauncher::new("https://github.com/hedgieinsocks/namplay#usage").launch(
+                app.active_window().as_ref(),
+                None::<&gio::Cancellable>,
+                |_| {},
+            );
+        })
+        .build();
+    app.add_action_entries([browse_action, usage_action]);
+
     let about_action = gio::ActionEntry::builder("about")
         .activate(|app: &adw::Application, _, _| {
             let about = adw::AboutWindow::builder()
                 .application_name("Namplay")
                 .application_icon(APP_ID)
                 .version("0.1.0")
-                .developers(["hedgieinsocks"])
+                .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
+                .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
                 .license_type(gtk4::License::MitX11)
                 .website("https://github.com/hedgieinsocks/namplay")
                 .issue_url("https://github.com/hedgieinsocks/namplay/issues")

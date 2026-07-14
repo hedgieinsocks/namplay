@@ -9,8 +9,9 @@ DESKTOP_DST := $(PREFIX)/share/applications/$(APP_ID).desktop
 SCHEMA_SRC  := data/$(APP_ID).gschema.xml
 SCHEMA_DST  := $(PREFIX)/share/glib-2.0/schemas/$(APP_ID).gschema.xml
 SCHEMA_DEV  := target/schemas
+MANIFEST    := $(APP_ID).yaml
 
-.PHONY: all help build run release install uninstall clean
+.PHONY: all help build run release install uninstall flatpak clean
 
 all: help
 
@@ -20,6 +21,7 @@ help:
 	@echo "release    compile optimized binary"
 	@echo "install    install to $(PREFIX)"
 	@echo "uninstall  remove installed files"
+	@echo "flatpak    build distributable flatpak bundle"
 	@echo "clean      remove build artifacts"
 
 build:
@@ -51,6 +53,10 @@ uninstall:
 	gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor
 	update-desktop-database $(PREFIX)/share/applications
 
+flatpak:
+	flatpak-builder --repo=repo --force-clean build-dir $(MANIFEST)
+	flatpak build-bundle repo $(BIN).flatpak $(APP_ID)
+
 clean:
 	cargo clean
-	rm -rf $(SCHEMA_DEV)
+	rm -rf $(SCHEMA_DEV) build-dir repo $(BIN).flatpak

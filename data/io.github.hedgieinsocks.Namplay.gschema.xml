@@ -14,7 +14,7 @@
       <summary>Whether the window is maximized</summary>
     </key>
     <key name="collapse-on-launch" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Collapse all expandable rows on launch</summary>
     </key>
 

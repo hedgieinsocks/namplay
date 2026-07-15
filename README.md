@@ -15,6 +15,13 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * Impulse Response
 * Presets
 
+## 📥 Installation
+
+```sh
+❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.2.1/io.github.hedgieinsocks.Namplay.flatpak
+❯ sudo flatpak install io.github.hedgieinsocks.Namplay.flatpak
+```
+
 ## 📖 Usage
 
 1. Configure Pipewire (JACK)

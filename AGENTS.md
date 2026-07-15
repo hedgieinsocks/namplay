@@ -1,4 +1,4 @@
-# agents.md
+# AGENTS.md
 
 Agent reference for Namplay. Read this before touching any code.
 
@@ -6,20 +6,25 @@ Agent reference for Namplay. Read this before touching any code.
 
 Namplay is a GTK4/Libadwaita desktop app for running Neural Amp Modeler (NAM) `.nam` profiles via PipeWire (JACK). It exposes a noise gate, 3-position EQ, optional pedal profile, amp profile, and impulse response (IR) convolution.
 
-Two source files. Two threads. No more.
+Two threads. No more.
 
 ---
 
 ## File Map
 
 ```
-src/main.rs          GTK4/Libadwaita UI thread
-src/audio.rs         JACK real-time audio thread
-data/window.blp      Blueprint UI definition (edit this, not generated XML)
+src/main.rs              GTK4/Libadwaita UI thread — build_ui, settings wiring
+src/profile.rs           Profile structs (serde), preset save/load helpers
+src/ui.rs                GTK helper functions (file picker rows, bind_*, reset buttons, EQ position)
+src/audio/mod.rs         AudioEngine + InitialParams — public audio API
+src/audio/processor.rs   NamProcessor struct + JACK ProcessHandler impl
+src/audio/dsp.rs         AtomicF32, NoiseGate, BiquadFilter, Eq, db_to_gain
+src/audio/ir.rs          load_wav_channels (WAV reading)
+data/window.blp          Blueprint UI definition (edit this, not generated XML)
 data/io.github.hedgieinsocks.Namplay.gschema.xml   GSettings schema
-build.rs             Calls blueprint-compiler at build time
-Cargo.toml           Dependencies
-Makefile             Build/run/install targets
+build.rs                 Calls blueprint-compiler at build time
+Cargo.toml               Dependencies
+Makefile                 Build/run/install targets
 ```
 
 ---
@@ -35,9 +40,9 @@ Makefile             Build/run/install targets
 - File picker rows use `gtk4::FileDialog` (async, callback-based).
 - Reset buttons call `settings.reset(key)`, which triggers `connect_changed` automatically.
 
-### Thread 2: Audio (`src/audio.rs`)
+### Thread 2: Audio (`src/audio/`)
 
-`AudioEngine` owns a JACK async client. The RT callback is `NamProcessor::process`.
+`AudioEngine` (in `mod.rs`) owns a JACK async client. The RT callback is `NamProcessor::process` (in `processor.rs`).
 
 Two IPC mechanisms between `AudioEngine` and `NamProcessor`:
 
@@ -61,11 +66,11 @@ Order inside `NamProcessor::process` per buffer:
 3. **Pedal NAM model** (optional) — with pedal in/out gain applied as linear scale
 4. **EQ at pos 1** (`pre-amp`) — optional, default position
 5. **Amp NAM model** — with amp in gain
-6. **IR convolution** via `FFTConvolver` — stereo if WAV has 2 channels, otherwise mono
+6. **IR convolution** via `FFTConvolver` (optional) — stereo if WAV has 2 channels, otherwise mono
 7. **EQ at pos 2** (`post-IR`) — optional; applied to both L and R when stereo IR
 8. **Output gain** — applied to L always, R copied from L if IR is mono
 
-Output is **zeroed** when both pedal model and amp model are absent (no passthrough).
+Input is **passed through** (copied to both L and R outputs) when both pedal model and amp model are absent. IR is also bypassed when absent — signal skips convolution and flows straight to output gain.
 
 ---
 
@@ -101,7 +106,7 @@ Schema ID: `io.github.hedgieinsocks.Namplay`
    - String enum → manual `connect_toggled` pattern (see `setup_eq_position`)
    - Add to `InitialParams` struct and pass initial value to `AudioEngine::new`
    - Add a `connect_changed` arm in the big match block
-3. Add method to `AudioEngine` + wire up the corresponding `Arc<Atomic*>` or channel in `audio.rs`.
+3. Add method to `AudioEngine` in `audio/mod.rs` + wire up the corresponding `Arc<Atomic*>` or channel; add the field to `NamProcessor` in `audio/processor.rs`.
 
 Forgetting any step causes silent bugs (UI changes don't reach audio, or state doesn't persist).
 
@@ -191,4 +196,4 @@ Errors (model load failure, JACK init failure) use `log::error`. Audio unavailab
 - **Adding schema key without `connect_changed` arm** — live changes don't reach audio.
 - **Editing `window.ui` directly** — it gets overwritten on next build.
 - **IR stereo right channel bug** — the right FFTConvolver processes `conv_buf` (pre-amp copy), not `out_l` (post-amp). That's intentional — both channels share the same pre-amp signal.
-- **EQ position integers** — 0=pre-pedal, 1=pre-amp (default), 2=post-IR. The string "pre-amp" maps to 1 via the `_ =>` arm in both `main.rs` and `audio.rs`.
+- **EQ position integers** — 0=pre-pedal, 1=pre-amp (default), 2=post-IR. The string "pre-amp" maps to 1 via the `_ =>` arm in both `main.rs` and `audio/mod.rs`.

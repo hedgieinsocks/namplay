@@ -21,10 +21,10 @@ jobs:
       - name: Build
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: namplay.flatpak
+          bundle: io.github.hedgieinsocks.Namplay
           manifest-path: io.github.hedgieinsocks.Namplay.yaml
       - name: Release
         uses: softprops/action-gh-release@v3
         if: github.ref_type == 'tag'
         with:
-          files: namplay.flatpak
+          files: io.github.hedgieinsocks.Namplay

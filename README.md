@@ -1,19 +1,21 @@
+<img src="data/io.github.hedgieinsocks.Namplay.png" width="128" height="128">
+
 # Namplay
 
-GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) profiles via PipeWire (JACK).
+GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) profiles via PipeWire (JACK)
 
 ![Screenshot](assets/screenshot.png)
 
-## Features
+## ✨ Features
 
 * Noise Gate
-* 3-band EQ with High and Low Pass (Pre Pedal, Pre Amp or Post IR)
+* 3-band EQ with High/Low Pass
 * Pedal NAM Profile
 * Amp/Rig NAM Pofile
 * Impulse Response
 * Presets
 
-## Usage
+## 📖 Usage
 
 1. Configure Pipewire (JACK)
 
@@ -29,11 +31,11 @@ jack.properties = {
 4. Select a profile downloaded from https://www.tone3000.com/
 5. Jam!
 
-## License
+## 📜 License
 
 [MIT](LICENSE)
 
-## AI Transparency & Attributions
+## 🔈 AI Transparency & Attributions
 
 This project is **vibe-coded** for my personal use. I'm not an audio engineer and don't write in rust, but I try to whip AI to keep it as simple and tight as possible. So far it meets my humble aesthetical and functional needs. Hopefully, you will find it useful as well.
 

@@ -11,11 +11,12 @@ SCHEMA_DST  := $(PREFIX)/share/glib-2.0/schemas/$(APP_ID).gschema.xml
 SCHEMA_DEV  := target/schemas
 MANIFEST    := $(APP_ID).yaml
 
-.PHONY: all help build run release install uninstall flatpak clean
+.PHONY: all help check build run release install uninstall flatpak clean
 
 all: help
 
 help:
+	@echo "check      run cargo check"
 	@echo "build      compile debug binary"
 	@echo "run        compile and run with dev schema"
 	@echo "release    compile optimized binary"
@@ -23,6 +24,9 @@ help:
 	@echo "uninstall  remove installed files"
 	@echo "flatpak    build distributable flatpak bundle"
 	@echo "clean      remove build artifacts"
+
+check:
+	cargo check
 
 build:
 	cargo build

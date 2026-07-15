@@ -5,9 +5,56 @@ use std::path::Path;
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
-use log::error;
+use log::{debug, error};
+use serde::{Deserialize, Serialize};
 
 use audio::{AudioEngine, InitialParams};
+
+#[derive(Serialize, Deserialize)]
+struct ProfileGate {
+    enabled: bool,
+    threashold: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProfileEq {
+    enabled: bool,
+    position: String,
+    hp: f64,
+    low: f64,
+    mid: f64,
+    high: f64,
+    lp: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProfilePedal {
+    file: String,
+    input: f64,
+    output: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProfileAmp {
+    file: String,
+    input: f64,
+    output: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProfileIr {
+    file: String,
+    level: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Profile {
+    gate: ProfileGate,
+    eq: ProfileEq,
+    pedal: ProfilePedal,
+    amp: ProfileAmp,
+    ir: ProfileIr,
+}
 
 const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
@@ -160,7 +207,7 @@ fn build_ui(app: &adw::Application) {
         pedal_out_gain_db: settings.double("pedal-profile-output") as f32,
         in_gain_db: settings.double("amp-profile-input") as f32,
         out_gain_db: settings.double("amp-profile-output") as f32,
-        model_path: path_from_settings(&settings, "amp-profile-path"),
+        profile_path: path_from_settings(&settings, "amp-profile-path"),
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
@@ -176,12 +223,11 @@ fn build_ui(app: &adw::Application) {
         eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
-            // Keep engine alive inside the 'static closure owned by GSettings
             settings.connect_changed(None, move |s, key| match key {
-                "pedal-profile-path" => engine.load_pedal_model(path_from_settings(s, key)),
+                "pedal-profile-path" => engine.load_pedal_profile(path_from_settings(s, key)),
                 "pedal-profile-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
                 "pedal-profile-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
-                "amp-profile-path" => engine.load_model(path_from_settings(s, key)),
+                "amp-profile-path" => engine.load_amp_profile(path_from_settings(s, key)),
                 "ir-path" => engine.load_ir(path_from_settings(s, key)),
                 "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
                 "amp-profile-input" => engine.set_in_gain_db(s.double(key) as f32),
@@ -202,7 +248,12 @@ fn build_ui(app: &adw::Application) {
                 _ => {}
             });
         }
-        Err(e) => error!("audio unavailable: {e}"),
+        Err(e) => {
+            error!("audio unavailable: {e}");
+            let toast_overlay: adw::ToastOverlay =
+                builder.object("toast_overlay").expect("toast_overlay");
+            toast_overlay.add_toast(adw::Toast::new("Audio unavailable"));
+        }
     }
 
     let settings_clone = settings.clone();
@@ -251,7 +302,7 @@ fn build_ui(app: &adw::Application) {
             let about = adw::AboutWindow::builder()
                 .application_name("Namplay")
                 .application_icon(APP_ID)
-                .version("0.1.0")
+                .version("0.2.0")
                 .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
                 .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
                 .license_type(gtk4::License::MitX11)
@@ -264,6 +315,8 @@ fn build_ui(app: &adw::Application) {
         })
         .build();
     app.add_action_entries([about_action]);
+
+    setup_preset_actions(&builder, &win, &settings, app);
 
     win.present();
 }
@@ -327,7 +380,6 @@ fn setup_file_picker_row(
     let filters = gio::ListStore::new::<gtk4::FileFilter>();
     filters.append(&filter);
 
-    let row_c = row.clone();
     let settings_c = settings.clone();
     let win_c = win.clone();
     let path_key_c = path_key.to_owned();
@@ -341,7 +393,6 @@ fn setup_file_picker_row(
         dialog.set_filters(Some(&filters_c));
         dialog.set_default_filter(Some(&filter_c));
 
-        let row = row_c.clone();
         let settings = settings_c.clone();
         let path_key = path_key_c.clone();
 
@@ -349,10 +400,6 @@ fn setup_file_picker_row(
             if let Ok(file) = result {
                 if let Some(path) = file.path() {
                     let _ = settings.set_string(&path_key, path.to_str().unwrap_or(""));
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    row.set_subtitle(name);
-                    row.set_enable_expansion(true);
-                    row.set_expanded(true);
                 }
             }
         });
@@ -360,12 +407,14 @@ fn setup_file_picker_row(
 
     let path_key_c = path_key.to_owned();
     let settings_c = settings.clone();
-    let row_c = row.clone();
 
     clear_button.connect_clicked(move |_| {
         settings_c.reset(&path_key_c);
-        row_c.set_subtitle("No file selected");
-        row_c.set_enable_expansion(false);
+    });
+
+    let row_c = row.clone();
+    settings.connect_changed(Some(path_key), move |s, key| {
+        update_file_row(&row_c, s.string(key).as_str());
     });
 }
 
@@ -425,4 +474,186 @@ fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
             let _ = settings_c.set_string("eq-position", "post-ir");
         }
     });
+
+    let pre_pedal_btn_c = pre_pedal_btn.clone();
+    let pre_amp_btn_c = pre_amp_btn.clone();
+    let post_ir_btn_c = post_ir_btn.clone();
+    settings.connect_changed(Some("eq-position"), move |s, key| {
+        match s.string(key).as_str() {
+            "pre-pedal" => pre_pedal_btn_c.set_active(true),
+            "post-ir" => post_ir_btn_c.set_active(true),
+            _ => pre_amp_btn_c.set_active(true),
+        }
+    });
+}
+
+fn round1(v: f64) -> f64 {
+    (v * 10.0).round() / 10.0
+}
+
+fn build_preset_from_settings(settings: &gio::Settings) -> Profile {
+    Profile {
+        gate: ProfileGate {
+            enabled: settings.boolean("noise-gate-enabled"),
+            threashold: round1(settings.double("noise-gate-threshold")),
+        },
+        eq: ProfileEq {
+            enabled: settings.boolean("eq-enabled"),
+            position: settings.string("eq-position").to_string(),
+            hp: settings.double("eq-hp").round(),
+            low: round1(settings.double("eq-low")),
+            mid: round1(settings.double("eq-mid")),
+            high: round1(settings.double("eq-high")),
+            lp: settings.double("eq-lp").round(),
+        },
+        pedal: ProfilePedal {
+            file: settings.string("pedal-profile-path").to_string(),
+            input: round1(settings.double("pedal-profile-input")),
+            output: round1(settings.double("pedal-profile-output")),
+        },
+        amp: ProfileAmp {
+            file: settings.string("amp-profile-path").to_string(),
+            input: round1(settings.double("amp-profile-input")),
+            output: round1(settings.double("amp-profile-output")),
+        },
+        ir: ProfileIr {
+            file: settings.string("ir-path").to_string(),
+            level: round1(settings.double("ir-level")),
+        },
+    }
+}
+
+fn apply_preset_to_settings(profile: &Profile, settings: &gio::Settings) {
+    let _ = settings.set_boolean("noise-gate-enabled", profile.gate.enabled);
+    let _ = settings.set_double("noise-gate-threshold", profile.gate.threashold);
+    let _ = settings.set_boolean("eq-enabled", profile.eq.enabled);
+    let eq_pos = match profile.eq.position.as_str() {
+        pos @ ("pre-pedal" | "post-ir") => pos,
+        _ => "pre-amp",
+    };
+    let _ = settings.set_string("eq-position", eq_pos);
+    let _ = settings.set_double("eq-hp", profile.eq.hp);
+    let _ = settings.set_double("eq-low", profile.eq.low);
+    let _ = settings.set_double("eq-mid", profile.eq.mid);
+    let _ = settings.set_double("eq-high", profile.eq.high);
+    let _ = settings.set_double("eq-lp", profile.eq.lp);
+    let _ = settings.set_string("pedal-profile-path", &profile.pedal.file);
+    let _ = settings.set_double("pedal-profile-input", profile.pedal.input);
+    let _ = settings.set_double("pedal-profile-output", profile.pedal.output);
+    let _ = settings.set_string("amp-profile-path", &profile.amp.file);
+    let _ = settings.set_double("amp-profile-input", profile.amp.input);
+    let _ = settings.set_double("amp-profile-output", profile.amp.output);
+    let _ = settings.set_string("ir-path", &profile.ir.file);
+    let _ = settings.set_double("ir-level", profile.ir.level);
+}
+
+fn update_file_row(row: &adw::ExpanderRow, path: &str) {
+    if path.is_empty() {
+        row.set_subtitle("No file selected");
+        row.set_enable_expansion(false);
+    } else {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        row.set_subtitle(name);
+        row.set_enable_expansion(true);
+        row.set_expanded(true);
+    }
+}
+
+fn setup_preset_actions(
+    builder: &gtk4::Builder,
+    win: &adw::ApplicationWindow,
+    settings: &gio::Settings,
+    app: &adw::Application,
+) {
+    let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
+
+    let settings_save = settings.clone();
+    let win_save = win.clone();
+    let toast_overlay_save = toast_overlay.clone();
+    let save_action = gio::ActionEntry::builder("save-preset")
+        .activate(move |_: &adw::Application, _, _| {
+            let profile = build_preset_from_settings(&settings_save);
+            let yaml = match serde_yaml::to_string(&profile) {
+                Ok(y) => y,
+                Err(e) => {
+                    error!("failed to serialize preset: {e}");
+                    toast_overlay_save.add_toast(adw::Toast::new("Failed to serialize preset"));
+                    return;
+                }
+            };
+
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Save Preset");
+            dialog.set_initial_name(Some("new_preset.yaml"));
+
+            let win = win_save.clone();
+            let toast_overlay = toast_overlay_save.clone();
+            dialog.save(Some(&win), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        if let Err(e) = std::fs::write(&path, yaml.as_bytes()) {
+                            error!("failed to write preset: {e}");
+                            toast_overlay.add_toast(adw::Toast::new("Failed to save preset"));
+                        } else {
+                            debug!("preset saved: {}", path.display());
+                        }
+                    }
+                }
+            });
+        })
+        .build();
+
+    let settings_load = settings.clone();
+    let win_load = win.clone();
+    let toast_overlay_load = toast_overlay.clone();
+    let load_action = gio::ActionEntry::builder("load-preset")
+        .activate(move |_: &adw::Application, _, _| {
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some("Namplay YAML Presets"));
+            filter.add_suffix("yaml");
+
+            let filters = gio::ListStore::new::<gtk4::FileFilter>();
+            filters.append(&filter);
+
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Load Preset");
+            dialog.set_filters(Some(&filters));
+            dialog.set_default_filter(Some(&filter));
+
+            let settings = settings_load.clone();
+            let win = win_load.clone();
+            let toast_overlay = toast_overlay_load.clone();
+
+            dialog.open(Some(&win), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        let content = match std::fs::read_to_string(&path) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                error!("failed to read preset: {e}");
+                                toast_overlay.add_toast(adw::Toast::new("Failed to read preset"));
+                                return;
+                            }
+                        };
+                        let profile = match serde_yaml::from_str::<Profile>(&content) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!("invalid preset: {e}");
+                                toast_overlay
+                                    .add_toast(adw::Toast::new(&format!("Failed to load preset")));
+                                return;
+                            }
+                        };
+                        debug!("preset loaded: {}", path.display());
+                        apply_preset_to_settings(&profile, &settings);
+                    }
+                }
+            });
+        })
+        .build();
+
+    app.add_action_entries([save_action, load_action]);
 }

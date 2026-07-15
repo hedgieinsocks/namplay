@@ -276,12 +276,12 @@ impl Eq {
 }
 
 struct NamProcessor {
-    pedal_model_rx: mpsc::Receiver<Option<Model>>,
-    current_pedal_model: Option<Model>,
+    pedal_profile_rx: mpsc::Receiver<Option<Model>>,
+    current_pedal_profile: Option<Model>,
     pedal_in_gain: Arc<AtomicF32>,
     pedal_out_gain: Arc<AtomicF32>,
-    model_rx: mpsc::Receiver<Option<Model>>,
-    current_model: Option<Model>,
+    profile_rx: mpsc::Receiver<Option<Model>>,
+    current_profile: Option<Model>,
     ir_rx: mpsc::Receiver<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
     current_ir_l: Option<FFTConvolver<f32>>,
     current_ir_r: Option<FFTConvolver<f32>>,
@@ -318,11 +318,11 @@ struct NamProcessor {
 
 impl ProcessHandler for NamProcessor {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
-        while let Ok(new_model) = self.pedal_model_rx.try_recv() {
-            self.current_pedal_model = new_model;
+        while let Ok(new_profile) = self.pedal_profile_rx.try_recv() {
+            self.current_pedal_profile = new_profile;
         }
-        while let Ok(new_model) = self.model_rx.try_recv() {
-            self.current_model = new_model;
+        while let Ok(new_profile) = self.profile_rx.try_recv() {
+            self.current_profile = new_profile;
         }
         while let Ok(new_ir) = self.ir_rx.try_recv() {
             match new_ir {
@@ -407,7 +407,7 @@ impl ProcessHandler for NamProcessor {
         let out_l = self.out_port_l.as_mut_slice(ps);
         let out_r = self.out_port_r.as_mut_slice(ps);
 
-        if self.current_pedal_model.is_none() && self.current_model.is_none() {
+        if self.current_pedal_profile.is_none() && self.current_profile.is_none() {
             for s in out_l.iter_mut() {
                 *s = 0.0;
             }
@@ -428,7 +428,7 @@ impl ProcessHandler for NamProcessor {
                 }
                 *o = s;
             }
-            if let Some(pedal) = &mut self.current_pedal_model {
+            if let Some(pedal) = &mut self.current_pedal_profile {
                 for s in out_l.iter_mut() {
                     *s *= pedal_in_gain;
                 }
@@ -445,7 +445,7 @@ impl ProcessHandler for NamProcessor {
                     }
                 }
             }
-            if let Some(amp) = &mut self.current_model {
+            if let Some(amp) = &mut self.current_profile {
                 for s in out_l.iter_mut() {
                     *s *= in_gain;
                 }
@@ -509,7 +509,7 @@ pub struct InitialParams {
     pub pedal_out_gain_db: f32,
     pub in_gain_db: f32,
     pub out_gain_db: f32,
-    pub model_path: Option<String>,
+    pub profile_path: Option<String>,
     pub ir_path: Option<String>,
     pub ir_level_db: f32,
     pub eq_enabled: bool,
@@ -523,10 +523,10 @@ pub struct InitialParams {
 
 pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
-    pedal_model_tx: mpsc::Sender<Option<Model>>,
+    pedal_profile_tx: mpsc::Sender<Option<Model>>,
     pedal_in_gain: Arc<AtomicF32>,
     pedal_out_gain: Arc<AtomicF32>,
-    model_tx: mpsc::Sender<Option<Model>>,
+    profile_tx: mpsc::Sender<Option<Model>>,
     ir_tx: mpsc::Sender<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
     in_gain: Arc<AtomicF32>,
     out_gain: Arc<AtomicF32>,
@@ -563,8 +563,8 @@ impl AudioEngine {
             .register_port("output_r", AudioOut::default())
             .map_err(|e| format!("register output_r port: {e}"))?;
 
-        let (pedal_model_tx, pedal_model_rx) = mpsc::channel();
-        let (model_tx, model_rx) = mpsc::channel();
+        let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
+        let (profile_tx, profile_rx) = mpsc::channel();
         let (ir_tx, ir_rx) =
             mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
@@ -630,12 +630,12 @@ impl AudioEngine {
         let initial_eq_r = params.eq_enabled.then(make_eq);
 
         let processor = NamProcessor {
-            pedal_model_rx,
-            current_pedal_model: None,
+            pedal_profile_rx,
+            current_pedal_profile: None,
             pedal_in_gain: Arc::clone(&pedal_in_gain),
             pedal_out_gain: Arc::clone(&pedal_out_gain),
-            model_rx,
-            current_model: None,
+            profile_rx,
+            current_profile: None,
             ir_rx,
             current_ir_l: None,
             current_ir_r: None,
@@ -676,10 +676,10 @@ impl AudioEngine {
 
         let engine = AudioEngine {
             _client: active_client,
-            pedal_model_tx,
+            pedal_profile_tx,
             pedal_in_gain,
             pedal_out_gain,
-            model_tx,
+            profile_tx,
             ir_tx,
             in_gain,
             out_gain,
@@ -697,35 +697,35 @@ impl AudioEngine {
             block_size,
         };
 
-        engine.load_pedal_model(params.pedal_path);
-        engine.load_model(params.model_path);
+        engine.load_pedal_profile(params.pedal_path);
+        engine.load_amp_profile(params.profile_path);
         engine.load_ir(params.ir_path);
 
         Ok(engine)
     }
 
-    pub fn load_pedal_model(&self, path: Option<String>) {
-        let tx = self.pedal_model_tx.clone();
+    pub fn load_pedal_profile(&self, path: Option<String>) {
+        let tx = self.pedal_profile_tx.clone();
         std::thread::spawn(move || {
-            let model = match path {
+            let profile = match path {
                 None => {
-                    debug!("pedal model cleared");
+                    debug!("pedal profile cleared");
                     None
                 }
                 Some(p) => {
-                    debug!("loading pedal model: {p}");
+                    debug!("loading pedal profile: {p}");
                     let m = NamModel::from_file(&p)
                         .ok()
                         .and_then(|nm| Model::from_nam(&nm).ok());
                     if m.is_some() {
-                        debug!("pedal model loaded: {p}");
+                        debug!("pedal profile loaded: {p}");
                     } else {
-                        error!("failed to load pedal model: {p}");
+                        error!("failed to load pedal profile: {p}");
                     }
                     m
                 }
             };
-            let _ = tx.send(model);
+            let _ = tx.send(profile);
         });
     }
 
@@ -739,28 +739,28 @@ impl AudioEngine {
         self.pedal_out_gain.set(db_to_gain(db));
     }
 
-    pub fn load_model(&self, path: Option<String>) {
-        let tx = self.model_tx.clone();
+    pub fn load_amp_profile(&self, path: Option<String>) {
+        let tx = self.profile_tx.clone();
         std::thread::spawn(move || {
-            let model = match path {
+            let profile = match path {
                 None => {
-                    debug!("amp model cleared");
+                    debug!("amp profile cleared");
                     None
                 }
                 Some(p) => {
-                    debug!("loading amp model: {p}");
+                    debug!("loading amp profile: {p}");
                     let m = NamModel::from_file(&p)
                         .ok()
                         .and_then(|nm| Model::from_nam(&nm).ok());
                     if m.is_some() {
-                        debug!("amp model loaded: {p}");
+                        debug!("amp profile loaded: {p}");
                     } else {
-                        error!("failed to load amp model: {p}");
+                        error!("failed to load amp profile: {p}");
                     }
                     m
                 }
             };
-            let _ = tx.send(model);
+            let _ = tx.send(profile);
         });
     }
 

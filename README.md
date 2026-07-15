@@ -11,6 +11,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * Pedal NAM Profile
 * Amp/Rig NAM Pofile
 * Impulse Response
+* Presets
 
 ## Usage
 

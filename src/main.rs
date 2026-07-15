@@ -259,7 +259,7 @@ fn build_ui(app: &adw::Application) {
             let about = adw::AboutWindow::builder()
                 .application_name("Namplay")
                 .application_icon(APP_ID)
-                .version("0.2.1")
+                .version("0.2.2")
                 .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
                 .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
                 .license_type(gtk4::License::MitX11)

@@ -124,52 +124,30 @@ pub fn setup_reset_button(builder: &gtk4::Builder, settings: &gio::Settings, id:
 }
 
 pub fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
-    let pre_pedal_btn: gtk4::ToggleButton = builder
-        .object("eq_pre_pedal_button")
-        .expect("eq_pre_pedal_button");
-    let pre_amp_btn: gtk4::ToggleButton = builder
-        .object("eq_pre_amp_button")
-        .expect("eq_pre_amp_button");
-    let post_ir_btn: gtk4::ToggleButton = builder
-        .object("eq_post_ir_button")
-        .expect("eq_post_ir_button");
+    let dropdown: gtk4::DropDown = builder
+        .object("eq_position_dropdown")
+        .expect("eq_position_dropdown");
 
-    match settings.string("eq-position").as_str() {
-        "pre-pedal" => pre_pedal_btn.set_active(true),
-        "post-ir" => post_ir_btn.set_active(true),
-        _ => pre_amp_btn.set_active(true),
-    }
+    let pos_to_index = |pos: &str| match pos {
+        "pre-pedal" => 0u32,
+        "post-ir" => 2u32,
+        _ => 1u32,
+    };
+
+    dropdown.set_selected(pos_to_index(settings.string("eq-position").as_str()));
 
     let settings_c = settings.clone();
-    pre_pedal_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            let _ = settings_c.set_string("eq-position", "pre-pedal");
-        }
+    dropdown.connect_selected_notify(move |dd| {
+        let key = match dd.selected() {
+            0 => "pre-pedal",
+            2 => "post-ir",
+            _ => "pre-amp",
+        };
+        let _ = settings_c.set_string("eq-position", key);
     });
 
-    let settings_c = settings.clone();
-    pre_amp_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            let _ = settings_c.set_string("eq-position", "pre-amp");
-        }
-    });
-
-    let settings_c = settings.clone();
-    post_ir_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            let _ = settings_c.set_string("eq-position", "post-ir");
-        }
-    });
-
-    let pre_pedal_btn_c = pre_pedal_btn.clone();
-    let pre_amp_btn_c = pre_amp_btn.clone();
-    let post_ir_btn_c = post_ir_btn.clone();
     settings.connect_changed(Some("eq-position"), move |s, key| {
-        match s.string(key).as_str() {
-            "pre-pedal" => pre_pedal_btn_c.set_active(true),
-            "post-ir" => post_ir_btn_c.set_active(true),
-            _ => pre_amp_btn_c.set_active(true),
-        }
+        dropdown.set_selected(pos_to_index(s.string(key).as_str()));
     });
 }
 

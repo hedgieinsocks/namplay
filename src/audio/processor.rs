@@ -14,15 +14,15 @@ pub(super) struct NamProcessor {
     pub(super) current_pedal_profile: Option<Model>,
     pub(super) pedal_in_gain: Arc<AtomicF32>,
     pub(super) pedal_out_gain: Arc<AtomicF32>,
-    pub(super) profile_rx: mpsc::Receiver<Option<Model>>,
+    pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_profile: Option<Model>,
     pub(super) ir_rx: mpsc::Receiver<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
     pub(super) current_ir_l: Option<FFTConvolver<f32>>,
     pub(super) current_ir_r: Option<FFTConvolver<f32>>,
     pub(super) conv_buf: Vec<f32>,
     pub(super) noise_gate: Option<NoiseGate>,
-    pub(super) in_gain: Arc<AtomicF32>,
-    pub(super) out_gain: Arc<AtomicF32>,
+    pub(super) amp_in_gain: Arc<AtomicF32>,
+    pub(super) amp_out_gain: Arc<AtomicF32>,
     pub(super) ir_level: Arc<AtomicF32>,
     pub(super) gate_enabled: Arc<AtomicBool>,
     pub(super) gate_threshold_db: Arc<AtomicF32>,
@@ -55,7 +55,7 @@ impl ProcessHandler for NamProcessor {
         while let Ok(new_profile) = self.pedal_profile_rx.try_recv() {
             self.current_pedal_profile = new_profile;
         }
-        while let Ok(new_profile) = self.profile_rx.try_recv() {
+        while let Ok(new_profile) = self.amp_profile_rx.try_recv() {
             self.current_profile = new_profile;
         }
         while let Ok(new_ir) = self.ir_rx.try_recv() {
@@ -84,8 +84,8 @@ impl ProcessHandler for NamProcessor {
 
         let pedal_in_gain = self.pedal_in_gain.get();
         let pedal_out_gain = self.pedal_out_gain.get();
-        let in_gain = self.in_gain.get();
-        let out_gain = self.out_gain.get();
+        let in_gain = self.amp_in_gain.get();
+        let out_gain = self.amp_out_gain.get();
         let ir_level = self.ir_level.get();
 
         let eq_enabled = self.eq_enabled.load(Ordering::Relaxed);

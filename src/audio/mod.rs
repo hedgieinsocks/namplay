@@ -19,12 +19,12 @@ use processor::NamProcessor;
 pub struct InitialParams {
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
-    pub pedal_path: Option<String>,
+    pub pedal_profile_path: Option<String>,
     pub pedal_in_gain_db: f32,
     pub pedal_out_gain_db: f32,
-    pub in_gain_db: f32,
-    pub out_gain_db: f32,
-    pub profile_path: Option<String>,
+    pub amp_in_gain_db: f32,
+    pub amp_out_gain_db: f32,
+    pub amp_profile_path: Option<String>,
     pub ir_path: Option<String>,
     pub ir_level_db: f32,
     pub eq_enabled: bool,
@@ -41,10 +41,10 @@ pub struct AudioEngine {
     pedal_profile_tx: mpsc::Sender<Option<Model>>,
     pedal_in_gain: Arc<AtomicF32>,
     pedal_out_gain: Arc<AtomicF32>,
-    profile_tx: mpsc::Sender<Option<Model>>,
+    amp_profile_tx: mpsc::Sender<Option<Model>>,
     ir_tx: mpsc::Sender<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>,
-    in_gain: Arc<AtomicF32>,
-    out_gain: Arc<AtomicF32>,
+    amp_in_gain: Arc<AtomicF32>,
+    amp_out_gain: Arc<AtomicF32>,
     ir_level: Arc<AtomicF32>,
     gate_enabled: Arc<AtomicBool>,
     gate_threshold_db: Arc<AtomicF32>,
@@ -79,14 +79,14 @@ impl AudioEngine {
             .map_err(|e| format!("register output_r port: {e}"))?;
 
         let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
-        let (profile_tx, profile_rx) = mpsc::channel();
+        let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
         let (ir_tx, ir_rx) =
             mpsc::channel::<Option<(FFTConvolver<f32>, Option<FFTConvolver<f32>>)>>();
 
         let pedal_in_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_in_gain_db)));
         let pedal_out_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_out_gain_db)));
-        let in_gain = Arc::new(AtomicF32::new(db_to_gain(params.in_gain_db)));
-        let out_gain = Arc::new(AtomicF32::new(db_to_gain(params.out_gain_db)));
+        let amp_in_gain = Arc::new(AtomicF32::new(db_to_gain(params.amp_in_gain_db)));
+        let amp_out_gain = Arc::new(AtomicF32::new(db_to_gain(params.amp_out_gain_db)));
         let ir_level = Arc::new(AtomicF32::new(db_to_gain(params.ir_level_db)));
         let gate_enabled = Arc::new(AtomicBool::new(params.gate_enabled));
         let gate_threshold_db = Arc::new(AtomicF32::new(params.gate_threshold_db));
@@ -104,7 +104,7 @@ impl AudioEngine {
         );
         debug!(
             "amp: in={}dB out={}dB",
-            params.in_gain_db, params.out_gain_db
+            params.amp_in_gain_db, params.amp_out_gain_db
         );
         debug!("IR: level={}dB", params.ir_level_db);
         debug!(
@@ -149,15 +149,15 @@ impl AudioEngine {
             current_pedal_profile: None,
             pedal_in_gain: Arc::clone(&pedal_in_gain),
             pedal_out_gain: Arc::clone(&pedal_out_gain),
-            profile_rx,
+            amp_profile_rx,
             current_profile: None,
             ir_rx,
             current_ir_l: None,
             current_ir_r: None,
             conv_buf: vec![0.0f32; block_size],
             noise_gate: initial_gate,
-            in_gain: Arc::clone(&in_gain),
-            out_gain: Arc::clone(&out_gain),
+            amp_in_gain: Arc::clone(&amp_in_gain),
+            amp_out_gain: Arc::clone(&amp_out_gain),
             ir_level: Arc::clone(&ir_level),
             gate_enabled: Arc::clone(&gate_enabled),
             gate_threshold_db: Arc::clone(&gate_threshold_db),
@@ -194,10 +194,10 @@ impl AudioEngine {
             pedal_profile_tx,
             pedal_in_gain,
             pedal_out_gain,
-            profile_tx,
+            amp_profile_tx,
             ir_tx,
-            in_gain,
-            out_gain,
+            amp_in_gain,
+            amp_out_gain,
             ir_level,
             gate_enabled,
             gate_threshold_db,
@@ -212,8 +212,8 @@ impl AudioEngine {
             block_size,
         };
 
-        engine.load_pedal_profile(params.pedal_path);
-        engine.load_amp_profile(params.profile_path);
+        engine.load_pedal_profile(params.pedal_profile_path);
+        engine.load_amp_profile(params.amp_profile_path);
         engine.load_ir(params.ir_path);
 
         Ok(engine)
@@ -263,7 +263,7 @@ impl AudioEngine {
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
-        let tx = self.profile_tx.clone();
+        let tx = self.amp_profile_tx.clone();
         let sample_rate = self.sample_rate;
         std::thread::spawn(move || {
             let profile = match path {
@@ -334,14 +334,14 @@ impl AudioEngine {
         self.ir_level.set(db_to_gain(db));
     }
 
-    pub fn set_in_gain_db(&self, db: f32) {
+    pub fn set_amp_in_gain_db(&self, db: f32) {
         debug!("amp: in={db}dB");
-        self.in_gain.set(db_to_gain(db));
+        self.amp_in_gain.set(db_to_gain(db));
     }
 
-    pub fn set_out_gain_db(&self, db: f32) {
+    pub fn set_amp_out_gain_db(&self, db: f32) {
         debug!("amp: out={db}dB");
-        self.out_gain.set(db_to_gain(db));
+        self.amp_out_gain.set(db_to_gain(db));
     }
 
     pub fn set_gate_enabled(&self, enabled: bool) {

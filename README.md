@@ -18,7 +18,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 ## 📥 Installation
 
 ```sh
-❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.2.2/io.github.hedgieinsocks.Namplay.flatpak
+❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.2.3/io.github.hedgieinsocks.Namplay.flatpak
 ❯ sudo flatpak install io.github.hedgieinsocks.Namplay.flatpak
 ```
 

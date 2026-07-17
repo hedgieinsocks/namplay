@@ -159,12 +159,12 @@ fn build_ui(app: &adw::Application) {
     match AudioEngine::new(InitialParams {
         gate_enabled: settings.boolean("noise-gate-enabled"),
         gate_threshold_db: settings.double("noise-gate-threshold") as f32,
-        pedal_path: path_from_settings(&settings, "pedal-profile-path"),
+        pedal_profile_path: path_from_settings(&settings, "pedal-profile-path"),
         pedal_in_gain_db: settings.double("pedal-profile-input") as f32,
         pedal_out_gain_db: settings.double("pedal-profile-output") as f32,
-        in_gain_db: settings.double("amp-profile-input") as f32,
-        out_gain_db: settings.double("amp-profile-output") as f32,
-        profile_path: path_from_settings(&settings, "amp-profile-path"),
+        amp_in_gain_db: settings.double("amp-profile-input") as f32,
+        amp_out_gain_db: settings.double("amp-profile-output") as f32,
+        amp_profile_path: path_from_settings(&settings, "amp-profile-path"),
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
@@ -187,8 +187,8 @@ fn build_ui(app: &adw::Application) {
                 "amp-profile-path" => engine.load_amp_profile(path_from_settings(s, key)),
                 "ir-path" => engine.load_ir(path_from_settings(s, key)),
                 "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
-                "amp-profile-input" => engine.set_in_gain_db(s.double(key) as f32),
-                "amp-profile-output" => engine.set_out_gain_db(s.double(key) as f32),
+                "amp-profile-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
+                "amp-profile-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
                 "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
                 "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
                 "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
@@ -259,7 +259,7 @@ fn build_ui(app: &adw::Application) {
             let about = adw::AboutWindow::builder()
                 .application_name("Namplay")
                 .application_icon(APP_ID)
-                .version("0.2.2")
+                .version("0.2.3")
                 .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
                 .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
                 .license_type(gtk4::License::MitX11)

@@ -1,14 +1,28 @@
+//! Impulse response loading: WAV decode and FFT convolver setup.
+
+use fft_convolver::FFTConvolver;
 use log::warn;
 
-pub(super) fn load_wav_channels(
-    path: &str,
-    jack_sample_rate: u32,
-) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
+/// Left convolver, plus a right one when the IR file is stereo.
+pub(super) type IrConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
+
+pub(super) fn load(path: &str, sample_rate: u32, block_size: usize) -> Option<IrConvolvers> {
+    let (left, right) = load_wav_channels(path, sample_rate)?;
+    let mut conv_l = FFTConvolver::<f32>::default();
+    conv_l.init(block_size, &left).ok()?;
+    let conv_r = right.and_then(|r| {
+        let mut c = FFTConvolver::<f32>::default();
+        c.init(block_size, &r).ok().map(|_| c)
+    });
+    Some((conv_l, conv_r))
+}
+
+fn load_wav_channels(path: &str, jack_sample_rate: u32) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
         warn!(
-            "IR sample rate {} != JACK rate {}, pitch may differ",
+            "IR sample rate {} != JACK sample rate {}",
             spec.sample_rate, jack_sample_rate
         );
     }

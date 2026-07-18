@@ -1,3 +1,6 @@
+//! Widget setup helpers: window state, file picker rows, slider and toggle
+//! bindings, EQ position dropdown, preset save/load actions.
+
 use std::path::Path;
 
 use gio::prelude::*;
@@ -5,7 +8,8 @@ use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
 
-use crate::profile::{apply_preset_to_settings, build_preset_from_settings, Profile};
+use crate::audio::EqPosition;
+use crate::preset::Preset;
 
 pub fn restore_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
     win.set_default_size(settings.int("window-width"), settings.int("window-height"));
@@ -32,76 +36,85 @@ pub fn path_from_settings(settings: &gio::Settings, key: &str) -> Option<String>
     }
 }
 
+/// A file-backed ExpanderRow whose widget ids follow the
+/// `{prefix}_row` / `{prefix}_button` / `{prefix}_clear_button` convention.
+pub struct FilePickerSpec {
+    pub prefix: &'static str,
+    pub key: &'static str,
+    pub title: &'static str,
+    pub filter_name: &'static str,
+    pub filter_suffix: &'static str,
+}
+
 pub fn setup_file_picker_row(
     builder: &gtk4::Builder,
     win: &adw::ApplicationWindow,
     settings: &gio::Settings,
-    row_id: &str,
-    button_id: &str,
-    clear_id: &str,
-    path_key: &str,
-    title: &str,
-    filter_name: &str,
-    filter_suffix: &str,
+    spec: &FilePickerSpec,
 ) {
-    let row: adw::ExpanderRow = builder.object(row_id).expect(row_id);
-    let button: gtk4::Button = builder.object(button_id).expect(button_id);
-    let clear_button: gtk4::Button = builder.object(clear_id).expect(clear_id);
+    let row: adw::ExpanderRow = builder
+        .object(format!("{}_row", spec.prefix))
+        .expect(spec.prefix);
+    let button: gtk4::Button = builder
+        .object(format!("{}_button", spec.prefix))
+        .expect(spec.prefix);
+    let clear_button: gtk4::Button = builder
+        .object(format!("{}_clear_button", spec.prefix))
+        .expect(spec.prefix);
 
-    let stored = settings.string(path_key);
-    if !stored.is_empty() {
-        let name = Path::new(stored.as_str())
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(stored.as_str());
-        row.set_subtitle(name);
-        row.set_enable_expansion(true);
-        row.set_expanded(true);
-    }
+    update_file_row(&row, settings.string(spec.key).as_str());
 
     let filter = gtk4::FileFilter::new();
-    filter.set_name(Some(filter_name));
-    filter.add_suffix(filter_suffix);
+    filter.set_name(Some(spec.filter_name));
+    filter.add_suffix(spec.filter_suffix);
 
     let filters = gio::ListStore::new::<gtk4::FileFilter>();
     filters.append(&filter);
 
     let settings_c = settings.clone();
     let win_c = win.clone();
-    let path_key_c = path_key.to_owned();
-    let title_c = title.to_owned();
-    let filter_c = filter.clone();
-    let filters_c = filters.clone();
+    let key = spec.key;
+    let title = spec.title;
 
     button.connect_clicked(move |_| {
         let dialog = gtk4::FileDialog::new();
-        dialog.set_title(&title_c);
-        dialog.set_filters(Some(&filters_c));
-        dialog.set_default_filter(Some(&filter_c));
+        dialog.set_title(title);
+        dialog.set_filters(Some(&filters));
+        dialog.set_default_filter(Some(&filter));
 
         let settings = settings_c.clone();
-        let path_key = path_key_c.clone();
-
         dialog.open(Some(&win_c), None::<&gio::Cancellable>, move |result| {
             if let Ok(file) = result {
                 if let Some(path) = file.path() {
-                    let _ = settings.set_string(&path_key, path.to_str().unwrap_or(""));
+                    let _ = settings.set_string(key, path.to_str().unwrap_or(""));
                 }
             }
         });
     });
 
-    let path_key_c = path_key.to_owned();
     let settings_c = settings.clone();
-
     clear_button.connect_clicked(move |_| {
-        settings_c.reset(&path_key_c);
+        settings_c.reset(key);
     });
 
-    let row_c = row.clone();
-    settings.connect_changed(Some(path_key), move |s, key| {
-        update_file_row(&row_c, s.string(key).as_str());
+    settings.connect_changed(Some(spec.key), move |s, key| {
+        update_file_row(&row, s.string(key).as_str());
     });
+}
+
+fn update_file_row(row: &adw::ExpanderRow, path: &str) {
+    if path.is_empty() {
+        row.set_subtitle("No file selected");
+        row.set_enable_expansion(false);
+    } else {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        row.set_subtitle(name);
+        row.set_enable_expansion(true);
+        row.set_expanded(true);
+    }
 }
 
 pub fn bind_adjustment(builder: &gtk4::Builder, settings: &gio::Settings, id: &str, key: &str) {
@@ -128,42 +141,20 @@ pub fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
         .object("eq_position_dropdown")
         .expect("eq_position_dropdown");
 
-    let pos_to_index = |pos: &str| match pos {
-        "pre-pedal" => 0u32,
-        "post-ir" => 2u32,
-        _ => 1u32,
-    };
-
-    dropdown.set_selected(pos_to_index(settings.string("eq-position").as_str()));
+    dropdown
+        .set_selected(EqPosition::from_setting(settings.string("eq-position").as_str()).index());
 
     let settings_c = settings.clone();
     dropdown.connect_selected_notify(move |dd| {
-        let key = match dd.selected() {
-            0 => "pre-pedal",
-            2 => "post-ir",
-            _ => "pre-amp",
-        };
-        let _ = settings_c.set_string("eq-position", key);
+        let _ = settings_c.set_string(
+            "eq-position",
+            EqPosition::from_index(dd.selected()).setting(),
+        );
     });
 
     settings.connect_changed(Some("eq-position"), move |s, key| {
-        dropdown.set_selected(pos_to_index(s.string(key).as_str()));
+        dropdown.set_selected(EqPosition::from_setting(s.string(key).as_str()).index());
     });
-}
-
-pub fn update_file_row(row: &adw::ExpanderRow, path: &str) {
-    if path.is_empty() {
-        row.set_subtitle("No file selected");
-        row.set_enable_expansion(false);
-    } else {
-        let name = Path::new(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(path);
-        row.set_subtitle(name);
-        row.set_enable_expansion(true);
-        row.set_expanded(true);
-    }
 }
 
 pub fn setup_preset_actions(
@@ -179,8 +170,8 @@ pub fn setup_preset_actions(
     let toast_overlay_save = toast_overlay.clone();
     let save_action = gio::ActionEntry::builder("save-preset")
         .activate(move |_: &adw::Application, _, _| {
-            let profile = build_preset_from_settings(&settings_save);
-            let yaml = match serde_yaml::to_string(&profile) {
+            let preset = Preset::from_settings(&settings_save);
+            let yaml = match serde_yaml::to_string(&preset) {
                 Ok(y) => y,
                 Err(e) => {
                     error!("failed to serialize preset: {e}");
@@ -242,17 +233,16 @@ pub fn setup_preset_actions(
                                 return;
                             }
                         };
-                        let profile = match serde_yaml::from_str::<Profile>(&content) {
+                        let preset = match serde_yaml::from_str::<Preset>(&content) {
                             Ok(p) => p,
                             Err(e) => {
                                 error!("invalid preset: {e}");
-                                toast_overlay
-                                    .add_toast(adw::Toast::new(&format!("Failed to load preset")));
+                                toast_overlay.add_toast(adw::Toast::new("Failed to load preset"));
                                 return;
                             }
                         };
                         debug!("preset loaded: {}", path.display());
-                        apply_preset_to_settings(&profile, &settings);
+                        preset.apply(&settings);
                     }
                 }
             });

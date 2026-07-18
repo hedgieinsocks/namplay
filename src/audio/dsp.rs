@@ -1,4 +1,9 @@
+//! DSP building blocks: noise gate, 3-band EQ with high/low-pass filters,
+//! and the atomic f32 used to share parameters with the real-time thread.
+
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type, Q_BUTTERWORTH_F32};
 
 const EQ_LOW_FREQ: f32 = 150.0;
 const EQ_MID_FREQ: f32 = 425.0;
@@ -48,6 +53,11 @@ impl NoiseGate {
         }
     }
 
+    pub(super) fn update(&mut self, threshold_db: f32) {
+        self.open_threshold = db_to_gain(threshold_db);
+        self.close_threshold = db_to_gain(threshold_db - 6.0);
+    }
+
     pub(super) fn process_sample(&mut self, sample: f32) -> f32 {
         let abs = sample.abs();
         let env_coeff = if abs > self.envelope {
@@ -82,141 +92,22 @@ impl NoiseGate {
     }
 }
 
-struct BiquadFilter {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-    x1: f32,
-    x2: f32,
-    y1: f32,
-    y2: f32,
-}
-
-impl BiquadFilter {
-    fn passthrough() -> Self {
-        BiquadFilter {
-            b0: 1.0,
-            b1: 0.0,
-            b2: 0.0,
-            a1: 0.0,
-            a2: 0.0,
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
-        }
-    }
-
-    fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
-            - self.a1 * self.y1
-            - self.a2 * self.y2;
-        self.x2 = self.x1;
-        self.x1 = x;
-        self.y2 = self.y1;
-        self.y1 = y;
-        y
-    }
-
-    fn set_low_shelf(&mut self, gain_db: f32, freq: f32, sample_rate: f32) {
-        let a = 10f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / 2.0 * 2.0f32.sqrt(); // shelf slope S=1
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha);
-        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
-        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha);
-        let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
-        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
-        let a2 = (a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha;
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_peaking(&mut self, gain_db: f32, freq: f32, q: f32, sample_rate: f32) {
-        let a = 10f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-        let b0 = 1.0 + alpha * a;
-        let b1 = -2.0 * cos_w0;
-        let b2 = 1.0 - alpha * a;
-        let a0 = 1.0 + alpha / a;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha / a;
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_highpass(&mut self, freq: f32, sample_rate: f32) {
-        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * 0.707f32);
-        let b0 = (1.0 + cos_w0) / 2.0;
-        let b1 = -(1.0 + cos_w0);
-        let b2 = (1.0 + cos_w0) / 2.0;
-        let a0 = 1.0 + alpha;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha;
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_lowpass(&mut self, freq: f32, sample_rate: f32) {
-        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * 0.707f32);
-        let b0 = (1.0 - cos_w0) / 2.0;
-        let b1 = 1.0 - cos_w0;
-        let b2 = (1.0 - cos_w0) / 2.0;
-        let a0 = 1.0 + alpha;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha;
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    fn set_high_shelf(&mut self, gain_db: f32, freq: f32, sample_rate: f32) {
-        let a = 10f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / 2.0 * 2.0f32.sqrt(); // shelf slope S=1
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha);
-        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
-        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha);
-        let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
-        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w0);
-        let a2 = (a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha;
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
+fn passthrough() -> Coefficients<f32> {
+    Coefficients {
+        b0: 1.0,
+        b1: 0.0,
+        b2: 0.0,
+        a1: 0.0,
+        a2: 0.0,
     }
 }
 
 pub(super) struct Eq {
-    hp: BiquadFilter,
-    low: BiquadFilter,
-    mid: BiquadFilter,
-    high: BiquadFilter,
-    lp: BiquadFilter,
+    hp: DirectForm1<f32>,
+    low: DirectForm1<f32>,
+    mid: DirectForm1<f32>,
+    high: DirectForm1<f32>,
+    lp: DirectForm1<f32>,
     sample_rate: f32,
 }
 
@@ -230,11 +121,11 @@ impl Eq {
         sample_rate: f32,
     ) -> Self {
         let mut eq = Eq {
-            hp: BiquadFilter::passthrough(),
-            low: BiquadFilter::passthrough(),
-            mid: BiquadFilter::passthrough(),
-            high: BiquadFilter::passthrough(),
-            lp: BiquadFilter::passthrough(),
+            hp: DirectForm1::<f32>::new(passthrough()),
+            low: DirectForm1::<f32>::new(passthrough()),
+            mid: DirectForm1::<f32>::new(passthrough()),
+            high: DirectForm1::<f32>::new(passthrough()),
+            lp: DirectForm1::<f32>::new(passthrough()),
             sample_rate,
         };
         eq.update(low_db, mid_db, high_db, hp_freq, lp_freq);
@@ -249,26 +140,58 @@ impl Eq {
         hp_freq: f32,
         lp_freq: f32,
     ) {
-        self.hp.set_highpass(hp_freq, self.sample_rate);
-        self.low
-            .set_low_shelf(low_db, EQ_LOW_FREQ, self.sample_rate);
+        let fs = self.sample_rate.hz();
+
+        if let Ok(c) =
+            Coefficients::<f32>::from_params(Type::HighPass, fs, hp_freq.hz(), Q_BUTTERWORTH_F32)
+        {
+            self.hp.update_coefficients(c);
+        }
+        if let Ok(c) = Coefficients::<f32>::from_params(
+            Type::LowShelf(low_db),
+            fs,
+            EQ_LOW_FREQ.hz(),
+            Q_BUTTERWORTH_F32,
+        ) {
+            self.low.update_coefficients(c);
+        }
         let mid_q = if mid_db < 0.0 {
             EQ_MID_Q_CUT
         } else {
             EQ_MID_Q_BOOST
         };
-        self.mid
-            .set_peaking(mid_db, EQ_MID_FREQ, mid_q, self.sample_rate);
-        self.high
-            .set_high_shelf(high_db, EQ_HIGH_FREQ, self.sample_rate);
-        self.lp.set_lowpass(lp_freq, self.sample_rate);
+        if let Ok(c) =
+            Coefficients::<f32>::from_params(Type::PeakingEQ(mid_db), fs, EQ_MID_FREQ.hz(), mid_q)
+        {
+            self.mid.update_coefficients(c);
+        }
+        if let Ok(c) = Coefficients::<f32>::from_params(
+            Type::HighShelf(high_db),
+            fs,
+            EQ_HIGH_FREQ.hz(),
+            Q_BUTTERWORTH_F32,
+        ) {
+            self.high.update_coefficients(c);
+        }
+        if let Ok(c) =
+            Coefficients::<f32>::from_params(Type::LowPass, fs, lp_freq.hz(), Q_BUTTERWORTH_F32)
+        {
+            self.lp.update_coefficients(c);
+        }
     }
 
-    pub(super) fn process_sample(&mut self, x: f32) -> f32 {
-        self.lp.process(
-            self.high
-                .process(self.mid.process(self.low.process(self.hp.process(x)))),
-        )
+    fn process_sample(&mut self, x: f32) -> f32 {
+        let x = self.hp.run(x);
+        let x = self.low.run(x);
+        let x = self.mid.run(x);
+        let x = self.high.run(x);
+        self.lp.run(x)
+    }
+
+    pub(super) fn process_buffer(&mut self, buf: &mut [f32]) {
+        for s in buf {
+            *s = self.process_sample(*s);
+        }
     }
 }
 

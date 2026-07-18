@@ -1,5 +1,8 @@
+//! Application entry point: builds the window and wires GSettings changes
+//! to the audio engine.
+
 mod audio;
-mod profile;
+mod preset;
 mod ui;
 
 use gio::prelude::*;
@@ -7,14 +10,65 @@ use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::error;
 
-use audio::{AudioEngine, InitialParams};
+use audio::{AudioEngine, EqPosition, InitialParams};
 use ui::{
     bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
     setup_eq_position, setup_file_picker_row, setup_preset_actions, setup_reset_button,
+    FilePickerSpec,
 };
 
 const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
+
+/// File-backed rows; widget ids are derived from `prefix` (see `FilePickerSpec`).
+const FILE_PICKERS: &[FilePickerSpec] = &[
+    FilePickerSpec {
+        prefix: "pedal_profile",
+        key: "pedal-profile-path",
+        title: "Choose Pedal Profile",
+        filter_name: "NAM Profiles",
+        filter_suffix: "nam",
+    },
+    FilePickerSpec {
+        prefix: "amp_profile",
+        key: "amp-profile-path",
+        title: "Choose Amp Profile",
+        filter_name: "NAM Profiles",
+        filter_suffix: "nam",
+    },
+    FilePickerSpec {
+        prefix: "ir",
+        key: "ir-path",
+        title: "Choose Impulse Response",
+        filter_name: "WAV Files",
+        filter_suffix: "wav",
+    },
+];
+
+/// Settings keys of the sliders; the matching adjustment and reset button ids
+/// are `{key with - replaced by _}_adjustment` / `..._reset_button`.
+const SLIDER_KEYS: &[&str] = &[
+    "noise-gate-threshold",
+    "pedal-profile-input",
+    "pedal-profile-output",
+    "amp-profile-input",
+    "amp-profile-output",
+    "ir-level",
+    "eq-hp",
+    "eq-low",
+    "eq-mid",
+    "eq-high",
+    "eq-lp",
+];
+
+/// ExpanderRows collapsed on launch when "collapse-on-launch" is enabled.
+const EXPANDER_ROW_IDS: &[&str] = &[
+    "noise_gate_row",
+    "eq_row",
+    "pedal_profile_row",
+    "amp_profile_row",
+    "ir_row",
+];
 
 fn main() {
     env_logger::init();
@@ -39,121 +93,19 @@ fn build_ui(app: &adw::Application) {
 
     restore_window_state(&win, &settings);
 
-    setup_file_picker_row(
-        &builder,
-        &win,
-        &settings,
-        "pedal_profile_row",
-        "pedal_profile_button",
-        "pedal_profile_clear_button",
-        "pedal-profile-path",
-        "Choose Pedal Profile",
-        "NAM Profiles",
-        "nam",
-    );
-
-    setup_file_picker_row(
-        &builder,
-        &win,
-        &settings,
-        "amp_profile_row",
-        "amp_profile_button",
-        "amp_profile_clear_button",
-        "amp-profile-path",
-        "Choose Amp Profile",
-        "NAM Profiles",
-        "nam",
-    );
-
-    setup_file_picker_row(
-        &builder,
-        &win,
-        &settings,
-        "ir_row",
-        "ir_button",
-        "ir_clear_button",
-        "ir-path",
-        "Choose Impulse Response",
-        "WAV Files",
-        "wav",
-    );
+    for spec in FILE_PICKERS {
+        setup_file_picker_row(&builder, &win, &settings, spec);
+    }
 
     bind_toggle(&builder, &settings, "noise_gate_row", "noise-gate-enabled");
-    bind_adjustment(
-        &builder,
-        &settings,
-        "noise_gate_threshold_adjustment",
-        "noise-gate-threshold",
-    );
-    bind_adjustment(
-        &builder,
-        &settings,
-        "pedal_profile_input_adjustment",
-        "pedal-profile-input",
-    );
-    bind_adjustment(
-        &builder,
-        &settings,
-        "pedal_profile_output_adjustment",
-        "pedal-profile-output",
-    );
-    bind_adjustment(
-        &builder,
-        &settings,
-        "amp_profile_input_adjustment",
-        "amp-profile-input",
-    );
-    bind_adjustment(
-        &builder,
-        &settings,
-        "amp_profile_output_adjustment",
-        "amp-profile-output",
-    );
-    bind_adjustment(&builder, &settings, "ir_level_adjustment", "ir-level");
-
-    setup_reset_button(
-        &builder,
-        &settings,
-        "noise_gate_threshold_reset_button",
-        "noise-gate-threshold",
-    );
-    setup_reset_button(
-        &builder,
-        &settings,
-        "pedal_profile_input_reset_button",
-        "pedal-profile-input",
-    );
-    setup_reset_button(
-        &builder,
-        &settings,
-        "pedal_profile_output_reset_button",
-        "pedal-profile-output",
-    );
-    setup_reset_button(
-        &builder,
-        &settings,
-        "amp_profile_input_reset_button",
-        "amp-profile-input",
-    );
-    setup_reset_button(
-        &builder,
-        &settings,
-        "amp_profile_output_reset_button",
-        "amp-profile-output",
-    );
-    setup_reset_button(&builder, &settings, "ir_level_reset_button", "ir-level");
-
     bind_toggle(&builder, &settings, "eq_row", "eq-enabled");
-    bind_adjustment(&builder, &settings, "eq_hp_adjustment", "eq-hp");
-    bind_adjustment(&builder, &settings, "eq_low_adjustment", "eq-low");
-    bind_adjustment(&builder, &settings, "eq_mid_adjustment", "eq-mid");
-    bind_adjustment(&builder, &settings, "eq_high_adjustment", "eq-high");
-    bind_adjustment(&builder, &settings, "eq_lp_adjustment", "eq-lp");
-    setup_reset_button(&builder, &settings, "eq_hp_reset_button", "eq-hp");
-    setup_reset_button(&builder, &settings, "eq_low_reset_button", "eq-low");
-    setup_reset_button(&builder, &settings, "eq_mid_reset_button", "eq-mid");
-    setup_reset_button(&builder, &settings, "eq_high_reset_button", "eq-high");
-    setup_reset_button(&builder, &settings, "eq_lp_reset_button", "eq-lp");
+
+    for key in SLIDER_KEYS {
+        let id_base = key.replace('-', "_");
+        bind_adjustment(&builder, &settings, &format!("{id_base}_adjustment"), key);
+        setup_reset_button(&builder, &settings, &format!("{id_base}_reset_button"), key);
+    }
+
     setup_eq_position(&builder, &settings);
 
     match AudioEngine::new(InitialParams {
@@ -162,17 +114,13 @@ fn build_ui(app: &adw::Application) {
         pedal_profile_path: path_from_settings(&settings, "pedal-profile-path"),
         pedal_in_gain_db: settings.double("pedal-profile-input") as f32,
         pedal_out_gain_db: settings.double("pedal-profile-output") as f32,
+        amp_profile_path: path_from_settings(&settings, "amp-profile-path"),
         amp_in_gain_db: settings.double("amp-profile-input") as f32,
         amp_out_gain_db: settings.double("amp-profile-output") as f32,
-        amp_profile_path: path_from_settings(&settings, "amp-profile-path"),
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
-        eq_pos: match settings.string("eq-position").as_str() {
-            "pre-pedal" => 0,
-            "post-ir" => 2,
-            _ => 1,
-        },
+        eq_pos: EqPosition::from_setting(settings.string("eq-position").as_str()),
         eq_low_db: settings.double("eq-low") as f32,
         eq_mid_db: settings.double("eq-mid") as f32,
         eq_high_db: settings.double("eq-high") as f32,
@@ -181,22 +129,20 @@ fn build_ui(app: &adw::Application) {
     }) {
         Ok(engine) => {
             settings.connect_changed(None, move |s, key| match key {
+                "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
+                "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
                 "pedal-profile-path" => engine.load_pedal_profile(path_from_settings(s, key)),
                 "pedal-profile-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
                 "pedal-profile-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
                 "amp-profile-path" => engine.load_amp_profile(path_from_settings(s, key)),
-                "ir-path" => engine.load_ir(path_from_settings(s, key)),
-                "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
                 "amp-profile-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
                 "amp-profile-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
-                "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
-                "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
+                "ir-path" => engine.load_ir(path_from_settings(s, key)),
+                "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
                 "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
-                "eq-position" => engine.set_eq_pos(match s.string(key).as_str() {
-                    "pre-pedal" => 0,
-                    "post-ir" => 2,
-                    _ => 1,
-                }),
+                "eq-position" => {
+                    engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
+                }
                 "eq-low" => engine.set_eq_low_db(s.double(key) as f32),
                 "eq-mid" => engine.set_eq_mid_db(s.double(key) as f32),
                 "eq-high" => engine.set_eq_high_db(s.double(key) as f32),
@@ -222,14 +168,8 @@ fn build_ui(app: &adw::Application) {
     app.add_action(&settings.create_action("collapse-on-launch"));
 
     if settings.boolean("collapse-on-launch") {
-        for id in &[
-            "noise_gate_row",
-            "eq_row",
-            "pedal_profile_row",
-            "amp_profile_row",
-            "ir_row",
-        ] {
-            let row: adw::ExpanderRow = builder.object(*id).expect(*id);
+        for id in EXPANDER_ROW_IDS {
+            let row: adw::ExpanderRow = builder.object(*id).expect(id);
             row.set_expanded(false);
         }
     }
@@ -243,6 +183,7 @@ fn build_ui(app: &adw::Application) {
             );
         })
         .build();
+
     let usage_action = gio::ActionEntry::builder("usage-guide")
         .activate(|app: &adw::Application, _, _| {
             gtk4::UriLauncher::new("https://github.com/hedgieinsocks/namplay#usage").launch(
@@ -252,14 +193,13 @@ fn build_ui(app: &adw::Application) {
             );
         })
         .build();
-    app.add_action_entries([browse_action, usage_action]);
 
     let about_action = gio::ActionEntry::builder("about")
         .activate(|app: &adw::Application, _, _| {
             let about = adw::AboutWindow::builder()
                 .application_name("Namplay")
                 .application_icon(APP_ID)
-                .version("0.2.3")
+                .version(env!("CARGO_PKG_VERSION"))
                 .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
                 .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
                 .license_type(gtk4::License::MitX11)
@@ -271,7 +211,8 @@ fn build_ui(app: &adw::Application) {
             about.present();
         })
         .build();
-    app.add_action_entries([about_action]);
+
+    app.add_action_entries([browse_action, usage_action, about_action]);
 
     setup_preset_actions(&builder, &win, &settings, app);
 

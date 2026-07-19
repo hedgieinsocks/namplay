@@ -16,20 +16,24 @@ use super::ir::IrConvolvers;
 use super::EqPosition;
 
 pub(super) struct NamProcessor {
+    pub(super) mute: Arc<AtomicBool>,
     pub(super) gate_enabled: Arc<AtomicBool>,
     pub(super) gate_threshold_db: Arc<AtomicF32>,
     pub(super) noise_gate: NoiseGate,
     pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_pedal_profile: Option<Model>,
+    pub(super) pedal_bypass: Arc<AtomicBool>,
     pub(super) pedal_in_gain: Arc<AtomicF32>,
     pub(super) pedal_out_gain: Arc<AtomicF32>,
     pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_amp_profile: Option<Model>,
+    pub(super) amp_bypass: Arc<AtomicBool>,
     pub(super) amp_in_gain: Arc<AtomicF32>,
     pub(super) amp_out_gain: Arc<AtomicF32>,
     pub(super) ir_rx: mpsc::Receiver<Option<IrConvolvers>>,
     pub(super) current_ir_l: Option<FFTConvolver<f32>>,
     pub(super) current_ir_r: Option<FFTConvolver<f32>>,
+    pub(super) ir_bypass: Arc<AtomicBool>,
     pub(super) ir_level: Arc<AtomicF32>,
     pub(super) eq_enabled: Arc<AtomicBool>,
     pub(super) eq_pos: Arc<AtomicU32>,
@@ -73,6 +77,14 @@ impl ProcessHandler for NamProcessor {
             }
         }
 
+        if self.mute.load(Ordering::Relaxed) {
+            let out_l = self.out_port_l.as_mut_slice(ps);
+            let out_r = self.out_port_r.as_mut_slice(ps);
+            out_l.fill(0.0);
+            out_r.fill(0.0);
+            return Control::Continue;
+        }
+
         let gate_enabled = self.gate_enabled.load(Ordering::Relaxed);
         self.noise_gate.update(self.gate_threshold_db.get());
 
@@ -88,10 +100,13 @@ impl ProcessHandler for NamProcessor {
         self.eq_r
             .update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
 
+        let pedal_bypass = self.pedal_bypass.load(Ordering::Relaxed);
         let pedal_in_gain = self.pedal_in_gain.get();
         let pedal_out_gain = self.pedal_out_gain.get();
+        let amp_bypass = self.amp_bypass.load(Ordering::Relaxed);
         let amp_in_gain = self.amp_in_gain.get();
         let amp_out_gain = self.amp_out_gain.get();
+        let ir_bypass = self.ir_bypass.load(Ordering::Relaxed);
         let ir_level = self.ir_level.get();
 
         let input = self.in_port.as_slice(ps);
@@ -110,33 +125,39 @@ impl ProcessHandler for NamProcessor {
             self.eq_l.process_buffer(out_l);
         }
 
-        if let Some(pedal) = &mut self.current_pedal_profile {
-            apply_gain(out_l, pedal_in_gain);
-            pedal.process_buffer(out_l);
-            apply_gain(out_l, pedal_out_gain);
+        if !pedal_bypass {
+            if let Some(pedal) = &mut self.current_pedal_profile {
+                apply_gain(out_l, pedal_in_gain);
+                pedal.process_buffer(out_l);
+                apply_gain(out_l, pedal_out_gain);
+            }
         }
 
         if eq_enabled && eq_pos == EqPosition::PreAmp {
             self.eq_l.process_buffer(out_l);
         }
 
-        if let Some(amp) = &mut self.current_amp_profile {
-            apply_gain(out_l, amp_in_gain);
-            amp.process_buffer(out_l);
-            apply_gain(out_l, amp_out_gain);
+        if !amp_bypass {
+            if let Some(amp) = &mut self.current_amp_profile {
+                apply_gain(out_l, amp_in_gain);
+                amp.process_buffer(out_l);
+                apply_gain(out_l, amp_out_gain);
+            }
         }
 
         let n = out_l.len().min(self.conv_buf.len());
         let mut stereo_ir = false;
 
-        if let Some(ir_l) = &mut self.current_ir_l {
-            self.conv_buf[..n].copy_from_slice(&out_l[..n]);
-            let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
-            apply_gain(&mut out_l[..n], ir_level);
-            if let Some(ir_r) = &mut self.current_ir_r {
-                let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
-                apply_gain(&mut out_r[..n], ir_level);
-                stereo_ir = true;
+        if !ir_bypass {
+            if let Some(ir_l) = &mut self.current_ir_l {
+                self.conv_buf[..n].copy_from_slice(&out_l[..n]);
+                let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
+                apply_gain(&mut out_l[..n], ir_level);
+                if let Some(ir_r) = &mut self.current_ir_r {
+                    let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
+                    apply_gain(&mut out_r[..n], ir_level);
+                    stereo_ir = true;
+                }
             }
         }
 

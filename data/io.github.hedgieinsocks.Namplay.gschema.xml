@@ -24,7 +24,7 @@
     </key>
     <key name="noise-gate-threshold" type="d">
       <range min="-80" max="-20"/>
-      <default>-55</default>
+      <default>-60</default>
       <summary>Noise gate threshold in dB</summary>
     </key>
 
@@ -52,7 +52,7 @@
       <summary>Path to the selected impulse response file</summary>
     </key>
     <key name="ir-level" type="d">
-      <range min="-20" max="20"/>
+      <range min="-40" max="0"/>
       <default>-18</default>
       <summary>Impulse response output level in dB</summary>
     </key>

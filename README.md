@@ -20,9 +20,9 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 ```sh
 # install JACK implementation based on PipeWire e.g. on Fedora
 ❯ sudo dnf install pipewire-jack-audio-connection-kit
-# download latest flatpak release
-❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.2.4/io.github.hedgieinsocks.Namplay.flatpak
-# install it
+# download the latest flatpak release
+❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.3.0/io.github.hedgieinsocks.Namplay.flatpak
+# install the downloaded flatpak release
 ❯ sudo flatpak install io.github.hedgieinsocks.Namplay.flatpak
 ```
 
@@ -48,7 +48,7 @@ jack.properties = {
 
 ## 🔈 AI Transparency & Attributions
 
-This project is **vibe-coded** for my personal use. I'm not an audio engineer and don't write in rust, but I try to whip AI to keep it as simple and tight as possible. So far it meets my humble aesthetical and functional needs. Hopefully, you will find it useful as well.
+This project is vibe-coded for my personal use. I'm not an audio engineer and don't write in rust, but I use my knowledge of other programming languages to keep it as simple and tight as possible. So far it meets my humble aesthetical and functional needs. Hopefully, you will find it useful as well.
 
 * inspired by https://github.com/brummer10/NeuralRack
 * made possible with https://github.com/OpenSauce/nam-rs

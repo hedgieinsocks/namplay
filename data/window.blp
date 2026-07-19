@@ -42,8 +42,8 @@ Gtk.Adjustment amp_profile_output_adjustment {
 }
 
 Gtk.Adjustment ir_level_adjustment {
-  lower: -20;
-  upper: 20;
+  lower: -40;
+  upper: 0;
   value: -18;
   step-increment: 0.1;
   page-increment: 1;
@@ -134,6 +134,12 @@ Adw.ApplicationWindow window {
     child: Adw.ToolbarView {
       [top]
       Adw.HeaderBar {
+        [start]
+        Gtk.ToggleButton mute_button {
+          icon-name: "audio-volume-high-symbolic";
+          tooltip-text: "Mute";
+        }
+
         [end]
         Gtk.MenuButton {
           icon-name: "open-menu-symbolic";
@@ -464,6 +470,11 @@ Adw.ApplicationWindow window {
                   xalign: 1.0;
                 }
 
+                Gtk.ToggleButton pedal_profile_bypass_button {
+                  icon-name: "audio-volume-high-symbolic";
+                  tooltip-text: "Bypass";
+                }
+
                 Gtk.Button pedal_profile_input_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
@@ -501,6 +512,11 @@ Adw.ApplicationWindow window {
                   adjustment: pedal_profile_output_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
+                }
+
+                Gtk.Button pedal_profile_output_normalize_button {
+                  icon-name: "view-restore-symbolic";
+                  tooltip-text: "Normalize";
                 }
 
                 Gtk.Button pedal_profile_output_reset_button {
@@ -570,6 +586,11 @@ Adw.ApplicationWindow window {
                   xalign: 1.0;
                 }
 
+                Gtk.ToggleButton amp_profile_bypass_button {
+                  icon-name: "audio-volume-high-symbolic";
+                  tooltip-text: "Bypass";
+                }
+
                 Gtk.Button amp_profile_input_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
@@ -607,6 +628,11 @@ Adw.ApplicationWindow window {
                   adjustment: amp_profile_output_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
+                }
+
+                Gtk.Button amp_profile_output_normalize_button {
+                  icon-name: "view-restore-symbolic";
+                  tooltip-text: "Normalize";
                 }
 
                 Gtk.Button amp_profile_output_reset_button {
@@ -674,6 +700,11 @@ Adw.ApplicationWindow window {
                   adjustment: ir_level_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
+                }
+
+                Gtk.ToggleButton ir_bypass_button {
+                  icon-name: "audio-volume-high-symbolic";
+                  tooltip-text: "Bypass";
                 }
 
                 Gtk.Button ir_level_reset_button {

@@ -7,7 +7,7 @@ mod processor;
 
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 
 use jack::{AudioIn, AudioOut, Client, ClientOptions};
@@ -80,15 +80,21 @@ pub struct InitialParams {
 }
 
 pub struct AudioEngine {
+    pub mute: Arc<AtomicBool>,
     gate_enabled: Arc<AtomicBool>,
     gate_threshold_db: Arc<AtomicF32>,
     pedal_profile_tx: mpsc::Sender<Option<Model>>,
+    pub pedal_loudness: Arc<Mutex<Option<f32>>>,
+    pub pedal_bypass: Arc<AtomicBool>,
     pedal_in_gain: Arc<AtomicF32>,
     pedal_out_gain: Arc<AtomicF32>,
     amp_profile_tx: mpsc::Sender<Option<Model>>,
+    pub amp_loudness: Arc<Mutex<Option<f32>>>,
+    pub amp_bypass: Arc<AtomicBool>,
     amp_in_gain: Arc<AtomicF32>,
     amp_out_gain: Arc<AtomicF32>,
     ir_tx: mpsc::Sender<Option<IrConvolvers>>,
+    pub ir_bypass: Arc<AtomicBool>,
     ir_level: Arc<AtomicF32>,
     eq_enabled: Arc<AtomicBool>,
     eq_pos: Arc<AtomicU32>,
@@ -122,9 +128,15 @@ impl AudioEngine {
             .map_err(|e| format!("register output_r port: {e}"))?;
 
         let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
+        let pedal_loudness = Arc::new(Mutex::new(None::<f32>));
+        let pedal_bypass = Arc::new(AtomicBool::new(false));
         let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
+        let amp_loudness = Arc::new(Mutex::new(None::<f32>));
+        let amp_bypass = Arc::new(AtomicBool::new(false));
+        let ir_bypass = Arc::new(AtomicBool::new(false));
         let (ir_tx, ir_rx) = mpsc::channel::<Option<IrConvolvers>>();
 
+        let mute = Arc::new(AtomicBool::new(false));
         let gate_enabled = Arc::new(AtomicBool::new(params.gate_enabled));
         let gate_threshold_db = Arc::new(AtomicF32::new(params.gate_threshold_db));
         let pedal_in_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_in_gain_db)));
@@ -177,20 +189,24 @@ impl AudioEngine {
         };
 
         let processor = NamProcessor {
+            mute: Arc::clone(&mute),
             gate_enabled: Arc::clone(&gate_enabled),
             gate_threshold_db: Arc::clone(&gate_threshold_db),
             noise_gate: NoiseGate::new(params.gate_threshold_db, sample_rate),
             pedal_profile_rx,
             current_pedal_profile: None,
+            pedal_bypass: Arc::clone(&pedal_bypass),
             pedal_in_gain: Arc::clone(&pedal_in_gain),
             pedal_out_gain: Arc::clone(&pedal_out_gain),
             amp_profile_rx,
             current_amp_profile: None,
+            amp_bypass: Arc::clone(&amp_bypass),
             amp_in_gain: Arc::clone(&amp_in_gain),
             amp_out_gain: Arc::clone(&amp_out_gain),
             ir_rx,
             current_ir_l: None,
             current_ir_r: None,
+            ir_bypass: Arc::clone(&ir_bypass),
             ir_level: Arc::clone(&ir_level),
             eq_enabled: Arc::clone(&eq_enabled),
             eq_pos: Arc::clone(&eq_pos),
@@ -212,15 +228,21 @@ impl AudioEngine {
             .map_err(|e| format!("JACK: activation failed: {e}"))?;
 
         let engine = AudioEngine {
+            mute,
             gate_enabled,
             gate_threshold_db,
             pedal_profile_tx,
+            pedal_loudness,
+            pedal_bypass,
             pedal_in_gain,
             pedal_out_gain,
             amp_profile_tx,
+            amp_loudness,
+            amp_bypass,
             amp_in_gain,
             amp_out_gain,
             ir_tx,
+            ir_bypass,
             ir_level,
             eq_enabled,
             eq_pos,
@@ -257,6 +279,7 @@ impl AudioEngine {
             self.pedal_profile_tx.clone(),
             path,
             self.sample_rate,
+            Arc::clone(&self.pedal_loudness),
         );
     }
 
@@ -271,7 +294,13 @@ impl AudioEngine {
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
-        load_profile("AMP", self.amp_profile_tx.clone(), path, self.sample_rate);
+        load_profile(
+            "AMP",
+            self.amp_profile_tx.clone(),
+            path,
+            self.sample_rate,
+            Arc::clone(&self.amp_loudness),
+        );
     }
 
     pub fn set_amp_in_gain_db(&self, db: f32) {
@@ -355,11 +384,13 @@ fn load_profile(
     tx: mpsc::Sender<Option<Model>>,
     path: Option<String>,
     sample_rate: u32,
+    loudness_out: Arc<Mutex<Option<f32>>>,
 ) {
     std::thread::spawn(move || {
         let profile = match path {
             None => {
                 debug!("{label}: profile cleared");
+                *loudness_out.lock().unwrap() = None;
                 None
             }
             Some(p) => {
@@ -369,12 +400,14 @@ fn load_profile(
                     if model_sr != sample_rate {
                         warn!("{label}: profile sample rate {model_sr} != JACK sample rate {sample_rate}");
                     }
+                    *loudness_out.lock().unwrap() = nm.loudness();
                     Model::from_nam(&nm).ok()
                 });
                 if model.is_some() {
                     debug!("{label}: profile loaded: {p}");
                 } else {
                     error!("{label}: failed to load profile: {p}");
+                    *loudness_out.lock().unwrap() = None;
                 }
                 model
             }

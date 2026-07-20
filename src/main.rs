@@ -5,7 +5,10 @@ mod audio;
 mod preset;
 mod ui;
 
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use gio::prelude::*;
 use gtk4::prelude::*;
@@ -14,9 +17,9 @@ use log::{debug, error};
 
 use audio::{AudioEngine, EqPosition, InitialParams};
 use ui::{
-    bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
-    setup_eq_position, setup_file_picker_row, setup_preset_actions, setup_reset_button,
-    FilePickerSpec,
+    bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
+    save_window_state, setup_eq_position, setup_file_picker_row, setup_preset_actions,
+    setup_reset_button, FilePickerSpec,
 };
 
 const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
@@ -131,92 +134,68 @@ fn build_ui(app: &adw::Application) {
         eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
-            let pedal_loudness = Arc::clone(&engine.pedal_loudness);
-            let amp_loudness = Arc::clone(&engine.amp_loudness);
-            let mute = Arc::clone(&engine.mute);
-            let pedal_bypass = Arc::clone(&engine.pedal_bypass);
-            let amp_bypass = Arc::clone(&engine.amp_bypass);
-            let ir_bypass = Arc::clone(&engine.ir_bypass);
+            wire_toggle_button(&builder, "mute_button", "MUTE", Arc::clone(&engine.mute));
+            wire_toggle_button(
+                &builder,
+                "pedal_profile_bypass_button",
+                "PEDAL",
+                Arc::clone(&engine.pedal_bypass),
+            );
+            wire_toggle_button(
+                &builder,
+                "amp_profile_bypass_button",
+                "AMP",
+                Arc::clone(&engine.amp_bypass),
+            );
+            wire_toggle_button(
+                &builder,
+                "ir_bypass_button",
+                "IR",
+                Arc::clone(&engine.ir_bypass),
+            );
 
-            let mute_btn: gtk4::ToggleButton = builder.object("mute_button").expect("mute_button");
-            mute_btn.connect_toggled(move |btn| {
+            let tuner_window = create_tuner_window(&builder, Arc::clone(&engine.tuner_hz));
+            let tuner_window_ref = tuner_window.clone();
+
+            let tuner_enabled_btn = Arc::clone(&engine.tuner_enabled);
+            let tuner_enabled_win = Arc::clone(&engine.tuner_enabled);
+
+            let tuner_btn: gtk4::ToggleButton =
+                builder.object("tuner_button").expect("tuner_button");
+            let tuner_btn_ref = tuner_btn.clone();
+
+            tuner_btn.connect_toggled(move |btn| {
                 let active = btn.is_active();
-                debug!("MUTE: state={}", if active { "on" } else { "off" });
-                btn.set_icon_name(if active {
-                    "audio-volume-muted-symbolic"
+                debug!("TUNER: state={}", if active { "on" } else { "off" });
+                tuner_enabled_btn.store(active, Ordering::Relaxed);
+                if active {
+                    tuner_window.present();
                 } else {
-                    "audio-volume-high-symbolic"
-                });
-                mute.store(active, Ordering::Relaxed);
-            });
-
-            let bypass_btn: gtk4::ToggleButton = builder
-                .object("pedal_profile_bypass_button")
-                .expect("pedal_profile_bypass_button");
-            bypass_btn.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                debug!("PEDAL: bypass={}", if active { "on" } else { "off" });
-                btn.set_icon_name(if active {
-                    "audio-volume-muted-symbolic"
-                } else {
-                    "audio-volume-high-symbolic"
-                });
-                pedal_bypass.store(active, Ordering::Relaxed);
-            });
-
-            let bypass_btn: gtk4::ToggleButton = builder
-                .object("amp_profile_bypass_button")
-                .expect("amp_profile_bypass_button");
-            bypass_btn.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                debug!("AMP: bypass={}", if active { "on" } else { "off" });
-                btn.set_icon_name(if active {
-                    "audio-volume-muted-symbolic"
-                } else {
-                    "audio-volume-high-symbolic"
-                });
-                amp_bypass.store(active, Ordering::Relaxed);
-            });
-
-            let bypass_btn: gtk4::ToggleButton = builder
-                .object("ir_bypass_button")
-                .expect("ir_bypass_button");
-            bypass_btn.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                debug!("IR: bypass={}", if active { "on" } else { "off" });
-                btn.set_icon_name(if active {
-                    "audio-volume-muted-symbolic"
-                } else {
-                    "audio-volume-high-symbolic"
-                });
-                ir_bypass.store(active, Ordering::Relaxed);
-            });
-
-            let normalize_btn: gtk4::Button = builder
-                .object("pedal_profile_output_normalize_button")
-                .expect("pedal_profile_output_normalize_button");
-            let settings_c = settings.clone();
-            normalize_btn.connect_clicked(move |_| {
-                if let Some(loudness) = *pedal_loudness.lock().unwrap() {
-                    let gain_db = (((TARGET_LOUDNESS_LUFS - loudness as f64) * 10.0).round()
-                        / 10.0)
-                        .clamp(-20.0, 20.0);
-                    let _ = settings_c.set_double("pedal-profile-output", gain_db);
+                    tuner_window.set_visible(false);
                 }
             });
 
-            let normalize_btn: gtk4::Button = builder
-                .object("amp_profile_output_normalize_button")
-                .expect("amp_profile_output_normalize_button");
-            let settings_c = settings.clone();
-            normalize_btn.connect_clicked(move |_| {
-                if let Some(loudness) = *amp_loudness.lock().unwrap() {
-                    let gain_db = (((TARGET_LOUDNESS_LUFS - loudness as f64) * 10.0).round()
-                        / 10.0)
-                        .clamp(-20.0, 20.0);
-                    let _ = settings_c.set_double("amp-profile-output", gain_db);
+            tuner_window_ref.connect_visible_notify(move |win| {
+                if !win.is_visible() {
+                    tuner_enabled_win.store(false, Ordering::Relaxed);
+                    tuner_btn_ref.set_active(false);
                 }
             });
+
+            wire_normalize_button(
+                &builder,
+                "pedal_profile_output_normalize_button",
+                Arc::clone(&engine.pedal_loudness),
+                settings.clone(),
+                "pedal-profile-output",
+            );
+            wire_normalize_button(
+                &builder,
+                "amp_profile_output_normalize_button",
+                Arc::clone(&engine.amp_loudness),
+                settings.clone(),
+                "amp-profile-output",
+            );
 
             settings.connect_changed(None, move |s, key| match key {
                 "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
@@ -307,4 +286,40 @@ fn build_ui(app: &adw::Application) {
     setup_preset_actions(&builder, &win, &settings, app);
 
     win.present();
+}
+
+fn wire_toggle_button(
+    builder: &gtk4::Builder,
+    id: &str,
+    label: &'static str,
+    flag: Arc<AtomicBool>,
+) {
+    let btn: gtk4::ToggleButton = builder.object(id).expect(id);
+    btn.connect_toggled(move |btn| {
+        let active = btn.is_active();
+        debug!("{label}: {}", if active { "on" } else { "off" });
+        btn.set_icon_name(if active {
+            "audio-volume-muted-symbolic"
+        } else {
+            "audio-volume-high-symbolic"
+        });
+        flag.store(active, Ordering::Relaxed);
+    });
+}
+
+fn wire_normalize_button(
+    builder: &gtk4::Builder,
+    id: &str,
+    loudness: Arc<Mutex<Option<f32>>>,
+    settings: gio::Settings,
+    key: &'static str,
+) {
+    let btn: gtk4::Button = builder.object(id).expect(id);
+    btn.connect_clicked(move |_| {
+        if let Some(loudness) = *loudness.lock().unwrap() {
+            let gain_db = (((TARGET_LOUDNESS_LUFS - loudness as f64) * 10.0).round() / 10.0)
+                .clamp(-20.0, 20.0);
+            let _ = settings.set_double(key, gain_db);
+        }
+    });
 }

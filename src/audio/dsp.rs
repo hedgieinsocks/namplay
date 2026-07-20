@@ -11,16 +11,16 @@ const EQ_HIGH_FREQ: f32 = 1800.0;
 const EQ_MID_Q_CUT: f32 = 1.5;
 const EQ_MID_Q_BOOST: f32 = 0.7;
 
-pub(super) struct AtomicF32(AtomicU32);
+pub(crate) struct AtomicF32(AtomicU32);
 
 impl AtomicF32 {
-    pub(super) fn new(val: f32) -> Self {
+    pub(crate) fn new(val: f32) -> Self {
         AtomicF32(AtomicU32::new(val.to_bits()))
     }
-    pub(super) fn get(&self) -> f32 {
+    pub(crate) fn get(&self) -> f32 {
         f32::from_bits(self.0.load(Ordering::Relaxed))
     }
-    pub(super) fn set(&self, val: f32) {
+    pub(crate) fn set(&self, val: f32) {
         self.0.store(val.to_bits(), Ordering::Relaxed)
     }
 }

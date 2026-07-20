@@ -2,9 +2,10 @@
 //! gate -> EQ (pre-pedal) -> pedal -> EQ (pre-amp) -> amp -> IR -> EQ (post-IR),
 //! fanning out to stereo at the IR stage when the IR file has two channels.
 
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 
 use fft_convolver::FFTConvolver;
@@ -46,8 +47,10 @@ pub(super) struct NamProcessor {
     pub(super) eq_r: Eq,
     pub(super) conv_buf: Vec<f32>,
     pub(super) in_port: jack::Port<AudioIn>,
-    pub(super) out_port_l: jack::Port<AudioOut>,
-    pub(super) out_port_r: jack::Port<AudioOut>,
+    pub(super) out_port_1: jack::Port<AudioOut>,
+    pub(super) out_port_2: jack::Port<AudioOut>,
+    pub(super) tuner_samples: Arc<Mutex<VecDeque<f32>>>,
+    pub(super) tuner_enabled: Arc<AtomicBool>,
 }
 
 fn apply_gain(buf: &mut [f32], gain: f32) {
@@ -77,11 +80,33 @@ impl ProcessHandler for NamProcessor {
             }
         }
 
-        if self.mute.load(Ordering::Relaxed) {
-            let out_l = self.out_port_l.as_mut_slice(ps);
-            let out_r = self.out_port_r.as_mut_slice(ps);
-            out_l.fill(0.0);
-            out_r.fill(0.0);
+        let muted = self.mute.load(Ordering::Relaxed);
+
+        if self.tuner_enabled.load(Ordering::Relaxed) {
+            let input = self.in_port.as_slice(ps);
+            if let Ok(mut guard) = self.tuner_samples.try_lock() {
+                guard.extend(input.iter().copied());
+                const MAX: usize = super::tuner::SAMPLE_BUFFER_MAX;
+                if guard.len() > MAX {
+                    let excess = guard.len() - MAX;
+                    guard.drain(..excess);
+                }
+            }
+            let out_l = self.out_port_1.as_mut_slice(ps);
+            let out_r = self.out_port_2.as_mut_slice(ps);
+            if muted {
+                out_l.fill(0.0);
+                out_r.fill(0.0);
+            } else {
+                out_l.copy_from_slice(input);
+                out_r.copy_from_slice(input);
+            }
+            return Control::Continue;
+        }
+
+        if muted {
+            self.out_port_1.as_mut_slice(ps).fill(0.0);
+            self.out_port_2.as_mut_slice(ps).fill(0.0);
             return Control::Continue;
         }
 
@@ -110,8 +135,8 @@ impl ProcessHandler for NamProcessor {
         let ir_level = self.ir_level.get();
 
         let input = self.in_port.as_slice(ps);
-        let out_l = self.out_port_l.as_mut_slice(ps);
-        let out_r = self.out_port_r.as_mut_slice(ps);
+        let out_l = self.out_port_1.as_mut_slice(ps);
+        let out_r = self.out_port_2.as_mut_slice(ps);
 
         for (o, &i) in out_l.iter_mut().zip(input) {
             *o = if gate_enabled {

@@ -11,9 +11,10 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * Noise Gate
 * 3-band EQ with High/Low Pass
 * Pedal NAM Profile
-* Amp/Rig NAM Pofile
+* Amp/Rig NAM Profile
 * Impulse Response
 * Presets
+* Tuner
 
 ## 📥 Installation
 
@@ -21,7 +22,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 # install JACK implementation based on PipeWire e.g. on Fedora
 ❯ sudo dnf install pipewire-jack-audio-connection-kit
 # download the latest flatpak release
-❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.3.0/io.github.hedgieinsocks.Namplay.flatpak
+❯ curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.4.0/io.github.hedgieinsocks.Namplay.flatpak
 # install the downloaded flatpak release
 ❯ sudo flatpak install io.github.hedgieinsocks.Namplay.flatpak
 ```

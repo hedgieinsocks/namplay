@@ -23,14 +23,7 @@ pub struct PresetEq {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PresetPedal {
-    pub file: String,
-    pub input: f64,
-    pub output: f64,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct PresetAmp {
+pub struct PresetProfile {
     pub file: String,
     pub input: f64,
     pub output: f64,
@@ -46,8 +39,8 @@ pub struct PresetIr {
 pub struct Preset {
     pub gate: PresetGate,
     pub eq: PresetEq,
-    pub pedal: PresetPedal,
-    pub amp: PresetAmp,
+    pub pedal: PresetProfile,
+    pub amp: PresetProfile,
     pub ir: PresetIr,
 }
 
@@ -71,12 +64,12 @@ impl Preset {
                 high: round1(settings.double("eq-high")),
                 lp: settings.double("eq-lp").round() as u32,
             },
-            pedal: PresetPedal {
+            pedal: PresetProfile {
                 file: settings.string("pedal-profile-path").to_string(),
                 input: round1(settings.double("pedal-profile-input")),
                 output: round1(settings.double("pedal-profile-output")),
             },
-            amp: PresetAmp {
+            amp: PresetProfile {
                 file: settings.string("amp-profile-path").to_string(),
                 input: round1(settings.double("amp-profile-input")),
                 output: round1(settings.double("amp-profile-output")),

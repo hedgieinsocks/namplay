@@ -1,14 +1,19 @@
 //! Widget setup helpers: window state, file picker rows, slider and toggle
 //! bindings, EQ position dropdown, preset save/load actions.
 
+use std::cell::Cell;
 use std::path::Path;
+use std::rc::Rc;
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
 
-use crate::audio::EqPosition;
+use crate::audio::{AtomicF32, EqPosition};
 use crate::preset::Preset;
 
 pub fn restore_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
@@ -250,4 +255,88 @@ pub fn setup_preset_actions(
         .build();
 
     app.add_action_entries([save_action, load_action]);
+}
+
+pub fn create_tuner_window(builder: &gtk4::Builder, tuner_hz: Arc<AtomicF32>) -> adw::Window {
+    let window: adw::Window = builder.object("tuner_window").expect("tuner_window");
+    let note_label: gtk4::Label = builder
+        .object("tuner_note_label")
+        .expect("tuner_note_label");
+    let cents_label: gtk4::Label = builder
+        .object("tuner_cents_label")
+        .expect("tuner_cents_label");
+    let hz_label: gtk4::Label = builder.object("tuner_hz_label").expect("tuner_hz_label");
+
+    let timer_id: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
+
+    window.connect_show({
+        let note_label = note_label.clone();
+        let cents_label = cents_label.clone();
+        let hz_label = hz_label.clone();
+        let timer_id = timer_id.clone();
+        move |_| {
+            if let Some(id) = timer_id.take() {
+                id.remove();
+            }
+            let note_label = note_label.clone();
+            let cents_label = cents_label.clone();
+            let hz_label = hz_label.clone();
+            let tuner_hz = Arc::clone(&tuner_hz);
+            let id = glib::timeout_add_local(Duration::from_millis(250), move || {
+                let hz = tuner_hz.get();
+                if let Some((name, cents)) = hz_to_note(hz) {
+                    note_label.set_text(&name);
+                    cents_label.set_text(&format!("{:+.0} cents", cents));
+                    hz_label.set_text(&format!("{hz:.1} Hz"));
+                    if cents.abs() <= 5.0 {
+                        note_label.add_css_class("success");
+                    } else {
+                        note_label.remove_css_class("success");
+                    }
+                } else {
+                    note_label.set_text("--");
+                    cents_label.set_text("");
+                    hz_label.set_text("");
+                    note_label.remove_css_class("success");
+                }
+                glib::ControlFlow::Continue
+            });
+            timer_id.set(Some(id));
+        }
+    });
+
+    window.connect_hide({
+        let note_label = note_label.clone();
+        let cents_label = cents_label.clone();
+        let hz_label = hz_label.clone();
+        move |_| {
+            if let Some(id) = timer_id.take() {
+                id.remove();
+            }
+            note_label.set_text("--");
+            cents_label.set_text("");
+            hz_label.set_text("");
+        }
+    });
+
+    window
+}
+
+fn hz_to_note(hz: f32) -> Option<(String, f32)> {
+    if !(20.0..=8000.0).contains(&hz) {
+        return None;
+    }
+    let midi_float = 69.0 + 12.0 * (hz / 440.0).log2();
+    let midi_round = midi_float.round();
+    let cents = (midi_float - midi_round) * 100.0;
+    let midi_int = midi_round as i32;
+    if !(21..=108).contains(&midi_int) {
+        return None;
+    }
+    const NAMES: &[&str] = &[
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let octave = (midi_int / 12) - 1;
+    let name = format!("{}{}", NAMES[(midi_int % 12) as usize], octave);
+    Some((name, cents))
 }

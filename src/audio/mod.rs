@@ -4,7 +4,9 @@
 mod dsp;
 mod ir;
 mod processor;
+mod tuner;
 
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc, Arc, Mutex,
@@ -14,7 +16,8 @@ use jack::{AudioIn, AudioOut, Client, ClientOptions};
 use log::{debug, error, warn};
 use nam_rs::{Model, NamModel};
 
-use dsp::{db_to_gain, AtomicF32, Eq, NoiseGate};
+pub(crate) use dsp::AtomicF32;
+use dsp::{db_to_gain, Eq, NoiseGate};
 use ir::IrConvolvers;
 use processor::NamProcessor;
 
@@ -106,6 +109,9 @@ pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
     sample_rate: u32,
     block_size: usize,
+    pub tuner_hz: Arc<AtomicF32>,
+    pub tuner_enabled: Arc<AtomicBool>,
+    tuner_shutdown: Arc<AtomicBool>,
 }
 
 impl AudioEngine {
@@ -120,12 +126,12 @@ impl AudioEngine {
         let in_port = client
             .register_port("input", AudioIn::default())
             .map_err(|e| format!("register input port: {e}"))?;
-        let out_port_l = client
-            .register_port("output_l", AudioOut::default())
-            .map_err(|e| format!("register output_l port: {e}"))?;
-        let out_port_r = client
-            .register_port("output_r", AudioOut::default())
-            .map_err(|e| format!("register output_r port: {e}"))?;
+        let out_port_1 = client
+            .register_port("out_1", AudioOut::default())
+            .map_err(|e| format!("register out_1 port: {e}"))?;
+        let out_port_2 = client
+            .register_port("out_2", AudioOut::default())
+            .map_err(|e| format!("register out_2 port: {e}"))?;
 
         let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
         let pedal_loudness = Arc::new(Mutex::new(None::<f32>));
@@ -177,6 +183,16 @@ impl AudioEngine {
             params.eq_lp_freq,
         );
 
+        let tuner_enabled = Arc::new(AtomicBool::new(false));
+        let tuner_shutdown = Arc::new(AtomicBool::new(false));
+        let tuner_samples: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let tuner_hz = tuner::spawn(
+            Arc::clone(&tuner_samples),
+            Arc::clone(&tuner_enabled),
+            Arc::clone(&tuner_shutdown),
+            sample_rate,
+        );
+
         let make_eq = || {
             Eq::new(
                 params.eq_low_db,
@@ -219,8 +235,10 @@ impl AudioEngine {
             eq_r: make_eq(),
             conv_buf: vec![0.0f32; block_size],
             in_port,
-            out_port_l,
-            out_port_r,
+            out_port_1,
+            out_port_2,
+            tuner_samples: Arc::clone(&tuner_samples),
+            tuner_enabled: Arc::clone(&tuner_enabled),
         };
 
         let active_client = client
@@ -254,6 +272,9 @@ impl AudioEngine {
             _client: active_client,
             sample_rate,
             block_size,
+            tuner_hz,
+            tuner_enabled,
+            tuner_shutdown,
         };
 
         engine.load_pedal_profile(params.pedal_profile_path);
@@ -376,6 +397,12 @@ impl AudioEngine {
     pub fn set_eq_lp_freq(&self, hz: f32) {
         debug!("EQ: low-pass={hz}Hz");
         self.eq_lp_freq.set(hz);
+    }
+}
+
+impl Drop for AudioEngine {
+    fn drop(&mut self) {
+        self.tuner_shutdown.store(true, Ordering::Relaxed);
     }
 }
 

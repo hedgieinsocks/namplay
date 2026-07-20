@@ -4,7 +4,7 @@ using Adw 1;
 Gtk.Adjustment noise_gate_threshold_adjustment {
   lower: -80;
   upper: -20;
-  value: -55;
+  value: -60;
   step-increment: 0.1;
   page-increment: 1;
 }
@@ -127,6 +127,44 @@ menu primary_menu {
   }
 }
 
+Adw.Window tuner_window {
+  title: "Tuner";
+  transient-for: window;
+  default-width: 400;
+  default-height: 200;
+  resizable: false;
+  hide-on-close: true;
+
+  content: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Gtk.Box {
+      orientation: vertical;
+      spacing: 8;
+      halign: center;
+      valign: center;
+
+      Gtk.Label tuner_note_label {
+        label: "--";
+        width-chars: 3;
+
+        styles ["title-1"]
+      }
+
+      Gtk.Label tuner_cents_label {
+        width-chars: 10;
+      }
+
+      Gtk.Label tuner_hz_label {
+        width-chars: 10;
+
+        styles ["dim-label", "caption"]
+      }
+    };
+  };
+}
+
 Adw.ApplicationWindow window {
   title: "Namplay";
 
@@ -138,6 +176,12 @@ Adw.ApplicationWindow window {
         Gtk.ToggleButton mute_button {
           icon-name: "audio-volume-high-symbolic";
           tooltip-text: "Mute";
+        }
+
+        [start]
+        Gtk.ToggleButton tuner_button {
+          icon-name: "audio-x-generic-symbolic";
+          tooltip-text: "Tuner";
         }
 
         [end]

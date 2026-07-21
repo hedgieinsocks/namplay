@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "namplay"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "biquad",
  "env_logger",

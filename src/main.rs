@@ -20,7 +20,8 @@ use audio::{AudioEngine, EqPosition, InitialParams};
 use ui::{
     bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
     save_window_state, setup_buffer_size_dropdown, setup_device_rows, setup_eq_position,
-    setup_file_picker_row, setup_preset_actions, setup_reset_button, FilePickerSpec,
+    setup_file_picker_row, setup_preset_actions, setup_reset_button, show_persistent_toast,
+    FilePickerSpec,
 };
 
 const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
@@ -139,6 +140,24 @@ fn build_ui(app: &adw::Application) {
         eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
+            let toast_overlay: adw::ToastOverlay =
+                builder.object("toast_overlay").expect("toast_overlay");
+            let warning_rx = engine
+                .warning_rx
+                .borrow_mut()
+                .take()
+                .expect("warning receiver already taken");
+            glib::MainContext::default().spawn_local({
+                let toast_overlay = toast_overlay.clone();
+                async move {
+                    use futures_util::StreamExt;
+                    let mut warning_rx = warning_rx;
+                    while let Some(msg) = warning_rx.next().await {
+                        show_persistent_toast(&toast_overlay, &msg);
+                    }
+                }
+            });
+
             let sample_rate_label: gtk4::Label = builder
                 .object("sample_rate_label")
                 .expect("sample_rate_label");
@@ -256,10 +275,11 @@ fn build_ui(app: &adw::Application) {
             });
         }
         Err(e) => {
-            error!("audio unavailable: {e}");
+            let msg = format!("Audio unavailable: {e}");
+            error!("{msg}");
             let toast_overlay: adw::ToastOverlay =
                 builder.object("toast_overlay").expect("toast_overlay");
-            toast_overlay.add_toast(adw::Toast::new("Audio unavailable"));
+            show_persistent_toast(&toast_overlay, &msg);
         }
     }
 

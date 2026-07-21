@@ -15,6 +15,12 @@ use crate::preset::Preset;
 
 const BUFFER_SIZES: &[u32] = &[32, 64, 128, 256, 512, 1024];
 
+pub fn show_persistent_toast(toast_overlay: &adw::ToastOverlay, msg: &str) {
+    let toast = adw::Toast::new(msg);
+    toast.set_timeout(0);
+    toast_overlay.add_toast(toast);
+}
+
 pub fn restore_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
     win.set_default_size(settings.int("window-width"), settings.int("window-height"));
     if settings.boolean("window-maximized") {
@@ -309,8 +315,9 @@ pub fn setup_preset_actions(
             let yaml = match serde_yaml::to_string(&preset) {
                 Ok(y) => y,
                 Err(e) => {
-                    error!("failed to serialize preset: {e}");
-                    toast_overlay_save.add_toast(adw::Toast::new("Failed to serialize preset"));
+                    let msg = format!("PRESET: failed to serialize data: {e}");
+                    error!("{msg}");
+                    show_persistent_toast(&toast_overlay_save, &msg);
                     return;
                 }
             };
@@ -324,11 +331,13 @@ pub fn setup_preset_actions(
             dialog.save(Some(&win), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
+                        debug!("PRESET: saving file: {}", path.display());
                         if let Err(e) = std::fs::write(&path, yaml.as_bytes()) {
-                            error!("failed to write preset: {e}");
-                            toast_overlay.add_toast(adw::Toast::new("Failed to save preset"));
+                            let msg = format!("PRESET: failed to save file: {e}");
+                            error!("{msg}");
+                            show_persistent_toast(&toast_overlay, &msg);
                         } else {
-                            debug!("preset saved: {}", path.display());
+                            debug!("PRESET: file saved: {}", path.display());
                         }
                     }
                 }
@@ -360,23 +369,26 @@ pub fn setup_preset_actions(
             dialog.open(Some(&win), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
+                        debug!("PRESET: loading file: {}", path.display());
                         let content = match std::fs::read_to_string(&path) {
                             Ok(c) => c,
                             Err(e) => {
-                                error!("failed to read preset: {e}");
-                                toast_overlay.add_toast(adw::Toast::new("Failed to read preset"));
+                                let msg = format!("PRESET: failed to load file: {e}");
+                                error!("{msg}");
+                                show_persistent_toast(&toast_overlay, &msg);
                                 return;
                             }
                         };
                         let preset = match serde_yaml::from_str::<Preset>(&content) {
                             Ok(p) => p,
                             Err(e) => {
-                                error!("invalid preset: {e}");
-                                toast_overlay.add_toast(adw::Toast::new("Failed to load preset"));
+                                let msg = format!("PRESET: invalid format: {e}");
+                                error!("{msg}");
+                                show_persistent_toast(&toast_overlay, &msg);
                                 return;
                             }
                         };
-                        debug!("preset loaded: {}", path.display());
+                        debug!("PRESET: file loaded: {}", path.display());
                         preset.apply(&settings);
                     }
                 }

@@ -1,13 +1,19 @@
 //! Impulse response loading: WAV decode and FFT convolver setup.
 
 use fft_convolver::FFTConvolver;
+use futures_channel::mpsc::UnboundedSender;
 use log::warn;
 
 /// Left convolver, plus a right one when the IR file is stereo.
 pub(super) type IrConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
 
-pub(super) fn load(path: &str, sample_rate: u32, block_size: usize) -> Option<IrConvolvers> {
-    let (left, right) = load_wav_channels(path, sample_rate)?;
+pub(super) fn load(
+    path: &str,
+    sample_rate: u32,
+    block_size: usize,
+    warning_tx: &UnboundedSender<String>,
+) -> Option<IrConvolvers> {
+    let (left, right) = load_wav_channels(path, sample_rate, warning_tx)?;
     let mut conv_l = FFTConvolver::<f32>::default();
     conv_l.init(block_size, &left).ok()?;
     let conv_r = right.and_then(|r| {
@@ -17,14 +23,20 @@ pub(super) fn load(path: &str, sample_rate: u32, block_size: usize) -> Option<Ir
     Some((conv_l, conv_r))
 }
 
-fn load_wav_channels(path: &str, jack_sample_rate: u32) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
+fn load_wav_channels(
+    path: &str,
+    jack_sample_rate: u32,
+    warning_tx: &UnboundedSender<String>,
+) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
-        warn!(
-            "IR sample rate {} != JACK sample rate {}",
+        let msg = format!(
+            "IR: file sample rate {}Hz != JACK sample rate {}Hz",
             spec.sample_rate, jack_sample_rate
         );
+        warn!("{msg}");
+        let _ = warning_tx.unbounded_send(msg);
     }
     let channels = spec.channels as usize;
     let samples: Vec<f32> = match spec.sample_format {

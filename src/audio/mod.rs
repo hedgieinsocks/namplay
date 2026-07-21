@@ -13,6 +13,7 @@ use std::sync::{
     mpsc, Arc, Mutex,
 };
 
+use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use jack::{AudioIn, AudioOut, Client, ClientOptions, PortFlags};
 use log::{debug, error, warn};
 use nam_rs::{Model, NamModel};
@@ -118,6 +119,8 @@ pub struct AudioEngine {
     pub tuner_hz_rx: RefCell<Option<futures_channel::mpsc::UnboundedReceiver<f32>>>,
     pub tuner_enabled: Arc<AtomicBool>,
     tuner_shutdown: Arc<AtomicBool>,
+    warning_tx: UnboundedSender<String>,
+    pub warning_rx: RefCell<Option<UnboundedReceiver<String>>>,
 }
 
 impl AudioEngine {
@@ -125,12 +128,16 @@ impl AudioEngine {
         let (client, _status) = Client::new("namplay", ClientOptions::NO_START_SERVER)
             .map_err(|e| format!("JACK connection failed: {e}"))?;
 
+        let (warning_tx, warning_rx) = futures_channel::mpsc::unbounded();
+
         debug!("JACK: buffer_size={}", params.buffer_size);
         if let Err(e) = client.set_buffer_size(params.buffer_size) {
-            warn!(
+            let msg = format!(
                 "JACK: failed to set buffer size to {}: {e}",
                 params.buffer_size
             );
+            warn!("{msg}");
+            let _ = warning_tx.unbounded_send(msg);
         }
 
         let sample_rate = client.sample_rate();
@@ -291,6 +298,8 @@ impl AudioEngine {
             tuner_hz_rx: RefCell::new(Some(tuner_hz_rx)),
             tuner_enabled,
             tuner_shutdown,
+            warning_tx,
+            warning_rx: RefCell::new(Some(warning_rx)),
         };
 
         engine.load_pedal_profile(params.pedal_profile_path);
@@ -313,7 +322,9 @@ impl AudioEngine {
     pub fn set_buffer_size(&self, frames: u32) {
         debug!("JACK: buffer_size={frames}");
         if let Err(e) = self._client.as_client().set_buffer_size(frames) {
-            error!("JACK: failed to set buffer size to {frames}: {e}");
+            let msg = format!("JACK: failed to set buffer size to {frames}: {e}");
+            error!("{msg}");
+            let _ = self.warning_tx.unbounded_send(msg);
         }
     }
 
@@ -356,12 +367,18 @@ impl AudioEngine {
         match sources.first() {
             Some(source) => {
                 if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
-                    error!("INPUT: failed to connect {source}: {e}");
+                    let msg = format!("INPUT: failed to connect {source}: {e}");
+                    error!("{msg}");
+                    let _ = self.warning_tx.unbounded_send(msg);
                 } else {
                     debug!("INPUT: device={device} port={source}");
                 }
             }
-            None => warn!("INPUT: device not found: {device}"),
+            None => {
+                let msg = format!("INPUT: device not found: {device}");
+                warn!("{msg}");
+                let _ = self.warning_tx.unbounded_send(msg);
+            }
         }
     }
 
@@ -382,7 +399,9 @@ impl AudioEngine {
         let destinations = matching_ports(client, &device, PortFlags::IS_INPUT);
 
         if destinations.is_empty() {
-            warn!("OUTPUT: device not found: {device}");
+            let msg = format!("OUTPUT: device not found: {device}");
+            warn!("{msg}");
+            let _ = self.warning_tx.unbounded_send(msg);
             return;
         }
 
@@ -391,7 +410,9 @@ impl AudioEngine {
             .zip(destinations.iter())
         {
             if let Err(e) = client.connect_ports_by_name(own_port, dest) {
-                error!("OUTPUT: failed to connect {own_port} to {dest}: {e}");
+                let msg = format!("OUTPUT: failed to connect {own_port} to {dest}: {e}");
+                error!("{msg}");
+                let _ = self.warning_tx.unbounded_send(msg);
             } else {
                 debug!("OUTPUT: device={device} {own_port} -> {dest}");
             }
@@ -415,6 +436,7 @@ impl AudioEngine {
             path,
             self.sample_rate,
             Arc::clone(&self.pedal_loudness),
+            self.warning_tx.clone(),
         );
     }
 
@@ -435,6 +457,7 @@ impl AudioEngine {
             path,
             self.sample_rate,
             Arc::clone(&self.amp_loudness),
+            self.warning_tx.clone(),
         );
     }
 
@@ -452,6 +475,7 @@ impl AudioEngine {
         let tx = self.ir_tx.clone();
         let sample_rate = self.sample_rate;
         let block_size = self.block_size;
+        let warning_tx = self.warning_tx.clone();
         std::thread::spawn(move || {
             let convolvers = match path {
                 None => {
@@ -460,11 +484,13 @@ impl AudioEngine {
                 }
                 Some(p) => {
                     debug!("IR: loading file: {p}");
-                    let result = ir::load(&p, sample_rate, block_size);
+                    let result = ir::load(&p, sample_rate, block_size, &warning_tx);
                     if result.is_some() {
                         debug!("IR: file loaded: {p}");
                     } else {
-                        error!("IR: failed to load file: {p}");
+                        let msg = format!("IR: failed to load file: {p}");
+                        error!("{msg}");
+                        let _ = warning_tx.unbounded_send(msg);
                     }
                     result
                 }
@@ -560,6 +586,7 @@ fn load_profile(
     path: Option<String>,
     sample_rate: u32,
     loudness_out: Arc<Mutex<Option<f32>>>,
+    warning_tx: UnboundedSender<String>,
 ) {
     std::thread::spawn(move || {
         let profile = match path {
@@ -573,7 +600,9 @@ fn load_profile(
                 let model = NamModel::from_file(&p).ok().and_then(|nm| {
                     let model_sr = nm.expected_sample_rate() as u32;
                     if model_sr != sample_rate {
-                        warn!("{label}: profile sample rate {model_sr} != JACK sample rate {sample_rate}");
+                        let msg = format!("{label}: profile sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz");
+                        warn!("{msg}");
+                        let _ = warning_tx.unbounded_send(msg);
                     }
                     *loudness_out.lock().unwrap() = nm.loudness();
                     Model::from_nam(&nm).ok()
@@ -581,7 +610,9 @@ fn load_profile(
                 if model.is_some() {
                     debug!("{label}: profile loaded: {p}");
                 } else {
-                    error!("{label}: failed to load profile: {p}");
+                    let msg = format!("{label}: failed to load profile: {p}");
+                    error!("{msg}");
+                    let _ = warning_tx.unbounded_send(msg);
                     *loudness_out.lock().unwrap() = None;
                 }
                 model

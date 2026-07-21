@@ -27,7 +27,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * [ ] polished (no edge-case bugs)
 * [ ] discoverable (Flathub)
 
-* From Flathub's [Generative AI Policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy):
+From Flathub's [Generative AI Policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy):
 
 > Applications containing AI-generated or AI-assisted code, documentation, or any other content are not allowed.
 > Exceptions may be granted for mature, well-maintained projects.

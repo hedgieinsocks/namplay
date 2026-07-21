@@ -1,20 +1,19 @@
 //! Widget setup helpers: window state, file picker rows, slider and toggle
 //! bindings, EQ position dropdown, preset save/load actions.
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-
-use std::sync::Arc;
-use std::time::Duration;
 
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
 
-use crate::audio::{AtomicF32, EqPosition};
+use crate::audio::{AudioEngine, EqPosition};
 use crate::preset::Preset;
+
+const BUFFER_SIZES: &[u32] = &[32, 64, 128, 256, 512, 1024];
 
 pub fn restore_window_state(win: &adw::ApplicationWindow, settings: &gio::Settings) {
     win.set_default_size(settings.int("window-width"), settings.int("window-height"));
@@ -162,6 +161,137 @@ pub fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
     });
 }
 
+pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Settings) {
+    let dropdown: gtk4::DropDown = builder
+        .object("buffer_size_dropdown")
+        .expect("buffer_size_dropdown");
+
+    let index_for = |frames: i32| {
+        BUFFER_SIZES
+            .iter()
+            .position(|&n| n as i32 == frames)
+            .unwrap_or_else(|| BUFFER_SIZES.iter().position(|&n| n == 256).unwrap_or(0))
+            as u32
+    };
+
+    dropdown.set_selected(index_for(settings.int("buffer-size")));
+
+    let settings_c = settings.clone();
+    dropdown.connect_selected_notify(move |dd| {
+        if let Some(&frames) = BUFFER_SIZES.get(dd.selected() as usize) {
+            let _ = settings_c.set_int("buffer-size", frames as i32);
+        }
+    });
+
+    settings.connect_changed(Some("buffer-size"), move |s, key| {
+        dropdown.set_selected(index_for(s.int(key)));
+    });
+}
+
+pub fn setup_device_rows(
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    engine: Rc<AudioEngine>,
+) {
+    setup_device_dropdown(
+        builder,
+        settings,
+        "input_device_dropdown",
+        "input_device_refresh_button",
+        "input-device",
+        Rc::clone(&engine),
+        AudioEngine::input_devices,
+    );
+    setup_device_dropdown(
+        builder,
+        settings,
+        "output_device_dropdown",
+        "output_device_refresh_button",
+        "output-device",
+        engine,
+        AudioEngine::output_devices,
+    );
+}
+
+fn setup_device_dropdown(
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    dropdown_id: &str,
+    refresh_button_id: &str,
+    key: &'static str,
+    engine: Rc<AudioEngine>,
+    list_devices: fn(&AudioEngine) -> Vec<String>,
+) {
+    let dropdown: gtk4::DropDown = builder.object(dropdown_id).expect(dropdown_id);
+    let refresh_button: gtk4::Button = builder.object(refresh_button_id).expect(refresh_button_id);
+
+    const NONE_LABEL: &str = "None";
+    let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+
+    let rebuild: Rc<dyn Fn(Vec<String>)> = Rc::new({
+        let dropdown = dropdown.clone();
+        let known = Rc::clone(&known);
+        let settings = settings.clone();
+        move |devices: Vec<String>| {
+            *known.borrow_mut() = devices.clone();
+
+            let current = settings.string(key).to_string();
+            let model = gtk4::StringList::new(&[NONE_LABEL]);
+            for device in &devices {
+                model.append(device);
+            }
+            dropdown.set_model(Some(&model));
+
+            let selected = if current.is_empty() {
+                0
+            } else {
+                devices
+                    .iter()
+                    .position(|d| d == &current)
+                    .map(|i| i as u32 + 1)
+                    .unwrap_or(0)
+            };
+            dropdown.set_selected(selected);
+        }
+    });
+
+    rebuild(list_devices(&engine));
+
+    let settings_c = settings.clone();
+    dropdown.connect_selected_notify(move |dd| {
+        let name = if dd.selected() == 0 {
+            String::new()
+        } else {
+            dd.selected_item()
+                .and_downcast::<gtk4::StringObject>()
+                .map(|s| s.string().to_string())
+                .unwrap_or_default()
+        };
+        let _ = settings_c.set_string(key, &name);
+    });
+
+    let dropdown_c = dropdown.clone();
+    let known_c = Rc::clone(&known);
+    settings.connect_changed(Some(key), move |s, k| {
+        let current = s.string(k).to_string();
+        let devices = known_c.borrow();
+        let selected = if current.is_empty() {
+            0
+        } else {
+            devices
+                .iter()
+                .position(|d| d == &current)
+                .map(|i| i as u32 + 1)
+                .unwrap_or(0)
+        };
+        dropdown_c.set_selected(selected);
+    });
+
+    refresh_button.connect_clicked(move |_| {
+        rebuild(list_devices(&engine));
+    });
+}
+
 pub fn setup_preset_actions(
     builder: &gtk4::Builder,
     win: &adw::ApplicationWindow,
@@ -257,7 +387,10 @@ pub fn setup_preset_actions(
     app.add_action_entries([save_action, load_action]);
 }
 
-pub fn create_tuner_window(builder: &gtk4::Builder, tuner_hz: Arc<AtomicF32>) -> adw::Window {
+pub fn create_tuner_window(
+    builder: &gtk4::Builder,
+    mut tuner_hz_rx: futures_channel::mpsc::UnboundedReceiver<f32>,
+) -> adw::Window {
     let window: adw::Window = builder.object("tuner_window").expect("tuner_window");
     let note_label: gtk4::Label = builder
         .object("tuner_note_label")
@@ -267,55 +400,36 @@ pub fn create_tuner_window(builder: &gtk4::Builder, tuner_hz: Arc<AtomicF32>) ->
         .expect("tuner_cents_label");
     let hz_label: gtk4::Label = builder.object("tuner_hz_label").expect("tuner_hz_label");
 
-    let timer_id: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
-
-    window.connect_show({
-        let note_label = note_label.clone();
-        let cents_label = cents_label.clone();
-        let hz_label = hz_label.clone();
-        let timer_id = timer_id.clone();
-        move |_| {
-            if let Some(id) = timer_id.take() {
-                id.remove();
-            }
-            let note_label = note_label.clone();
-            let cents_label = cents_label.clone();
-            let hz_label = hz_label.clone();
-            let tuner_hz = Arc::clone(&tuner_hz);
-            let id = glib::timeout_add_local(Duration::from_millis(250), move || {
-                let hz = tuner_hz.get();
-                if let Some((name, cents)) = hz_to_note(hz) {
-                    note_label.set_text(&name);
-                    cents_label.set_text(&format!("{:+.0} cents", cents));
-                    hz_label.set_text(&format!("{hz:.1} Hz"));
-                    if cents.abs() <= 5.0 {
-                        note_label.add_css_class("success");
-                    } else {
-                        note_label.remove_css_class("success");
-                    }
-                } else {
-                    note_label.set_text("--");
-                    cents_label.set_text("");
-                    hz_label.set_text("");
-                    note_label.remove_css_class("success");
-                }
-                glib::ControlFlow::Continue
-            });
-            timer_id.set(Some(id));
-        }
-    });
-
     window.connect_hide({
         let note_label = note_label.clone();
         let cents_label = cents_label.clone();
         let hz_label = hz_label.clone();
         move |_| {
-            if let Some(id) = timer_id.take() {
-                id.remove();
-            }
             note_label.set_text("--");
             cents_label.set_text("");
             hz_label.set_text("");
+            note_label.remove_css_class("success");
+        }
+    });
+
+    glib::MainContext::default().spawn_local(async move {
+        use futures_util::StreamExt;
+        while let Some(hz) = tuner_hz_rx.next().await {
+            if let Some((name, cents)) = hz_to_note(hz) {
+                note_label.set_text(&name);
+                cents_label.set_text(&format!("{:+.0} cents", cents));
+                hz_label.set_text(&format!("{hz:.1} Hz"));
+                if cents.abs() <= 5.0 {
+                    note_label.add_css_class("success");
+                } else {
+                    note_label.remove_css_class("success");
+                }
+            } else {
+                note_label.set_text("--");
+                cents_label.set_text("");
+                hz_label.set_text("");
+                note_label.remove_css_class("success");
+            }
         }
     });
 

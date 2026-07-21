@@ -1,5 +1,5 @@
 //! Pitch detection thread: feeds audio samples from the real-time callback
-//! through the McLeod detector and writes the result to a shared atomic Hz value.
+//! through the McLeod detector and pushes the result to whoever is listening.
 
 use std::collections::VecDeque;
 use std::sync::{
@@ -7,6 +7,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
+use futures_channel::mpsc::UnboundedSender;
 use pitch_detection::detector::{mcleod::McLeodDetector, PitchDetector};
 
 const DETECTION_SIZE: usize = 2048;
@@ -21,14 +22,13 @@ pub(super) fn spawn(
     enabled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     sample_rate: u32,
-) -> Arc<super::AtomicF32> {
-    let hz_out = Arc::new(super::AtomicF32::new(0.0));
-    let hz = Arc::clone(&hz_out);
-
+    hz_tx: UnboundedSender<f32>,
+) {
     std::thread::Builder::new()
         .name("tuner".into())
         .spawn(move || {
             let mut detector = McLeodDetector::new(DETECTION_SIZE, DETECTION_PADDING);
+            let mut was_enabled = false;
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(80));
 
@@ -37,9 +37,13 @@ pub(super) fn spawn(
                 }
 
                 if !enabled.load(Ordering::Relaxed) {
-                    hz.set(0.0);
+                    if was_enabled {
+                        let _ = hz_tx.unbounded_send(0.0);
+                    }
+                    was_enabled = false;
                     continue;
                 }
+                was_enabled = true;
 
                 let window: Option<Vec<f32>> = {
                     let mut guard = samples.lock().unwrap();
@@ -64,10 +68,8 @@ pub(super) fn spawn(
                     .map(|p| p.frequency)
                     .unwrap_or(0.0);
 
-                hz.set(detected);
+                let _ = hz_tx.unbounded_send(detected);
             }
         })
         .expect("tuner thread spawn failed");
-
-    hz_out
 }

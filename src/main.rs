@@ -5,6 +5,7 @@ mod audio;
 mod preset;
 mod ui;
 
+use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -18,8 +19,8 @@ use log::{debug, error};
 use audio::{AudioEngine, EqPosition, InitialParams};
 use ui::{
     bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
-    save_window_state, setup_eq_position, setup_file_picker_row, setup_preset_actions,
-    setup_reset_button, FilePickerSpec,
+    save_window_state, setup_buffer_size_dropdown, setup_device_rows, setup_eq_position,
+    setup_file_picker_row, setup_preset_actions, setup_reset_button, FilePickerSpec,
 };
 
 const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
@@ -113,8 +114,12 @@ fn build_ui(app: &adw::Application) {
     }
 
     setup_eq_position(&builder, &settings);
+    setup_buffer_size_dropdown(&builder, &settings);
 
     match AudioEngine::new(InitialParams {
+        input_device: path_from_settings(&settings, "input-device"),
+        output_device: path_from_settings(&settings, "output-device"),
+        buffer_size: settings.int("buffer-size") as u32,
         gate_enabled: settings.boolean("noise-gate-enabled"),
         gate_threshold_db: settings.double("noise-gate-threshold") as f32,
         pedal_profile_path: path_from_settings(&settings, "pedal-profile-path"),
@@ -134,6 +139,18 @@ fn build_ui(app: &adw::Application) {
         eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
+            let sample_rate_label: gtk4::Label = builder
+                .object("sample_rate_label")
+                .expect("sample_rate_label");
+            sample_rate_label.set_text(&engine.sample_rate().to_string());
+
+            let latency_label: gtk4::Label =
+                builder.object("latency_label").expect("latency_label");
+            latency_label.set_text(&format_latency(engine.buffer_size(), engine.sample_rate()));
+
+            let engine = Rc::new(engine);
+            setup_device_rows(&builder, &settings, Rc::clone(&engine));
+
             wire_toggle_button(&builder, "mute_button", "MUTE", Arc::clone(&engine.mute));
             wire_toggle_button(
                 &builder,
@@ -154,32 +171,32 @@ fn build_ui(app: &adw::Application) {
                 Arc::clone(&engine.ir_bypass),
             );
 
-            let tuner_window = create_tuner_window(&builder, Arc::clone(&engine.tuner_hz));
-            let tuner_window_ref = tuner_window.clone();
+            let tuner_hz_rx = engine
+                .tuner_hz_rx
+                .borrow_mut()
+                .take()
+                .expect("tuner receiver already taken");
+            let tuner_window = create_tuner_window(&builder, tuner_hz_rx);
 
-            let tuner_enabled_btn = Arc::clone(&engine.tuner_enabled);
-            let tuner_enabled_win = Arc::clone(&engine.tuner_enabled);
+            let tuner_action = gio::ActionEntry::builder("tuner")
+                .activate({
+                    let tuner_window = tuner_window.clone();
+                    move |_: &adw::Application, _, _| {
+                        tuner_window.present();
+                    }
+                })
+                .build();
+            app.add_action_entries([tuner_action]);
 
-            let tuner_btn: gtk4::ToggleButton =
-                builder.object("tuner_button").expect("tuner_button");
-            let tuner_btn_ref = tuner_btn.clone();
-
-            tuner_btn.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                debug!("TUNER: state={}", if active { "on" } else { "off" });
-                tuner_enabled_btn.store(active, Ordering::Relaxed);
-                if active {
-                    tuner_window.present();
-                } else {
-                    tuner_window.set_visible(false);
-                }
+            let tuner_enabled = Arc::clone(&engine.tuner_enabled);
+            tuner_window.connect_show(move |_| {
+                debug!("TUNER: state=on");
+                tuner_enabled.store(true, Ordering::Relaxed);
             });
-
-            tuner_window_ref.connect_visible_notify(move |win| {
-                if !win.is_visible() {
-                    tuner_enabled_win.store(false, Ordering::Relaxed);
-                    tuner_btn_ref.set_active(false);
-                }
+            let tuner_enabled = Arc::clone(&engine.tuner_enabled);
+            tuner_window.connect_hide(move |_| {
+                debug!("TUNER: state=off");
+                tuner_enabled.store(false, Ordering::Relaxed);
             });
 
             wire_normalize_button(
@@ -198,6 +215,24 @@ fn build_ui(app: &adw::Application) {
             );
 
             settings.connect_changed(None, move |s, key| match key {
+                "input-device" => engine.set_input_device(path_from_settings(s, key)),
+                "output-device" => engine.set_output_device(path_from_settings(s, key)),
+                "buffer-size" => {
+                    engine.set_buffer_size(s.int(key) as u32);
+                    // PipeWire applies the new buffer size to the graph asynchronously,
+                    // so jack_get_buffer_size() briefly still reports the old value.
+                    let latency_label = latency_label.clone();
+                    let engine = Rc::clone(&engine);
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(100),
+                        move || {
+                            latency_label.set_text(&format_latency(
+                                engine.buffer_size(),
+                                engine.sample_rate(),
+                            ));
+                        },
+                    );
+                }
                 "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
                 "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
                 "pedal-profile-path" => engine.load_pedal_profile(path_from_settings(s, key)),
@@ -243,6 +278,13 @@ fn build_ui(app: &adw::Application) {
         }
     }
 
+    let audio_window: adw::Window = builder.object("audio_window").expect("audio_window");
+    let audio_action = gio::ActionEntry::builder("audio-settings")
+        .activate(move |_: &adw::Application, _, _| {
+            audio_window.present();
+        })
+        .build();
+
     let browse_action = gio::ActionEntry::builder("browse-profiles")
         .activate(|app: &adw::Application, _, _| {
             gtk4::UriLauncher::new("https://www.tone3000.com/search").launch(
@@ -269,8 +311,8 @@ fn build_ui(app: &adw::Application) {
                 .application_name("Namplay")
                 .application_icon(APP_ID)
                 .version(env!("CARGO_PKG_VERSION"))
-                .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire (JACK)")
-                .developers(["Claude", "hedgieinsocks", "Namplay contributors"])
+                .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire's JACK")
+                .developers(["Claude", "hedgieinsocks", "contributors"])
                 .license_type(gtk4::License::MitX11)
                 .website("https://github.com/hedgieinsocks/namplay")
                 .issue_url("https://github.com/hedgieinsocks/namplay/issues")
@@ -281,11 +323,15 @@ fn build_ui(app: &adw::Application) {
         })
         .build();
 
-    app.add_action_entries([browse_action, usage_action, about_action]);
+    app.add_action_entries([audio_action, browse_action, usage_action, about_action]);
 
     setup_preset_actions(&builder, &win, &settings, app);
 
     win.present();
+}
+
+fn format_latency(buffer_size: u32, sample_rate: u32) -> String {
+    format!("{:.1}", buffer_size as f64 / sample_rate as f64 * 1000.0)
 }
 
 fn wire_toggle_button(

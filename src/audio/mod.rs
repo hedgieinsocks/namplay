@@ -6,15 +6,18 @@ mod ir;
 mod processor;
 mod tuner;
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc, Arc, Mutex,
 };
 
-use jack::{AudioIn, AudioOut, Client, ClientOptions};
+use jack::{AudioIn, AudioOut, Client, ClientOptions, PortFlags};
 use log::{debug, error, warn};
 use nam_rs::{Model, NamModel};
+
+const MAX_BLOCK_SIZE: usize = 8192;
 
 pub(crate) use dsp::AtomicF32;
 use dsp::{db_to_gain, Eq, NoiseGate};
@@ -63,6 +66,9 @@ impl EqPosition {
 }
 
 pub struct InitialParams {
+    pub input_device: Option<String>,
+    pub output_device: Option<String>,
+    pub buffer_size: u32,
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
     pub pedal_profile_path: Option<String>,
@@ -109,7 +115,7 @@ pub struct AudioEngine {
     _client: jack::AsyncClient<(), NamProcessor>,
     sample_rate: u32,
     block_size: usize,
-    pub tuner_hz: Arc<AtomicF32>,
+    pub tuner_hz_rx: RefCell<Option<futures_channel::mpsc::UnboundedReceiver<f32>>>,
     pub tuner_enabled: Arc<AtomicBool>,
     tuner_shutdown: Arc<AtomicBool>,
 }
@@ -119,9 +125,17 @@ impl AudioEngine {
         let (client, _status) = Client::new("namplay", ClientOptions::NO_START_SERVER)
             .map_err(|e| format!("JACK connection failed: {e}"))?;
 
+        debug!("JACK: buffer_size={}", params.buffer_size);
+        if let Err(e) = client.set_buffer_size(params.buffer_size) {
+            warn!(
+                "JACK: failed to set buffer size to {}: {e}",
+                params.buffer_size
+            );
+        }
+
         let sample_rate = client.sample_rate();
         let block_size = client.buffer_size() as usize;
-        debug!("JACK: state=connected sample_rate={sample_rate} block_size={block_size}");
+        debug!("JACK: state=connected sample_rate={sample_rate}Hz");
 
         let in_port = client
             .register_port("input", AudioIn::default())
@@ -186,11 +200,13 @@ impl AudioEngine {
         let tuner_enabled = Arc::new(AtomicBool::new(false));
         let tuner_shutdown = Arc::new(AtomicBool::new(false));
         let tuner_samples: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
-        let tuner_hz = tuner::spawn(
+        let (tuner_hz_tx, tuner_hz_rx) = futures_channel::mpsc::unbounded();
+        tuner::spawn(
             Arc::clone(&tuner_samples),
             Arc::clone(&tuner_enabled),
             Arc::clone(&tuner_shutdown),
             sample_rate,
+            tuner_hz_tx,
         );
 
         let make_eq = || {
@@ -233,7 +249,7 @@ impl AudioEngine {
             eq_lp_freq: Arc::clone(&eq_lp_freq),
             eq_l: make_eq(),
             eq_r: make_eq(),
-            conv_buf: vec![0.0f32; block_size],
+            conv_buf: vec![0.0f32; MAX_BLOCK_SIZE],
             in_port,
             out_port_1,
             out_port_2,
@@ -272,7 +288,7 @@ impl AudioEngine {
             _client: active_client,
             sample_rate,
             block_size,
-            tuner_hz,
+            tuner_hz_rx: RefCell::new(Some(tuner_hz_rx)),
             tuner_enabled,
             tuner_shutdown,
         };
@@ -280,8 +296,106 @@ impl AudioEngine {
         engine.load_pedal_profile(params.pedal_profile_path);
         engine.load_amp_profile(params.amp_profile_path);
         engine.load_ir(params.ir_path);
+        engine.set_input_device(params.input_device);
+        engine.set_output_device(params.output_device);
 
         Ok(engine)
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn buffer_size(&self) -> u32 {
+        self._client.as_client().buffer_size()
+    }
+
+    pub fn set_buffer_size(&self, frames: u32) {
+        debug!("JACK: buffer_size={frames}");
+        if let Err(e) = self._client.as_client().set_buffer_size(frames) {
+            error!("JACK: failed to set buffer size to {frames}: {e}");
+        }
+    }
+
+    fn audio_devices(&self, flags: PortFlags) -> Vec<String> {
+        let client = self._client.as_client();
+        let own_name = client.name();
+        let mut names: Vec<String> = client
+            .ports(None, Some("32 bit float mono audio"), flags)
+            .iter()
+            .filter_map(|port| port.split_once(':').map(|(node, _)| node.to_string()))
+            .filter(|node| node != own_name)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    pub fn input_devices(&self) -> Vec<String> {
+        self.audio_devices(PortFlags::IS_OUTPUT)
+    }
+
+    pub fn output_devices(&self) -> Vec<String> {
+        self.audio_devices(PortFlags::IS_INPUT)
+    }
+
+    pub fn set_input_device(&self, device: Option<String>) {
+        let client = self._client.as_client();
+
+        if let Some(port) = client.port_by_name("namplay:input") {
+            let _ = client.disconnect(&port);
+        }
+
+        let Some(device) = device else {
+            debug!("INPUT: device cleared");
+            return;
+        };
+
+        let sources = matching_ports(client, &device, PortFlags::IS_OUTPUT);
+
+        match sources.first() {
+            Some(source) => {
+                if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
+                    error!("INPUT: failed to connect {source}: {e}");
+                } else {
+                    debug!("INPUT: device={device} port={source}");
+                }
+            }
+            None => warn!("INPUT: device not found: {device}"),
+        }
+    }
+
+    pub fn set_output_device(&self, device: Option<String>) {
+        let client = self._client.as_client();
+
+        for own_port in ["namplay:out_1", "namplay:out_2"] {
+            if let Some(port) = client.port_by_name(own_port) {
+                let _ = client.disconnect(&port);
+            }
+        }
+
+        let Some(device) = device else {
+            debug!("OUTPUT: device cleared");
+            return;
+        };
+
+        let destinations = matching_ports(client, &device, PortFlags::IS_INPUT);
+
+        if destinations.is_empty() {
+            warn!("OUTPUT: device not found: {device}");
+            return;
+        }
+
+        for (own_port, dest) in ["namplay:out_1", "namplay:out_2"]
+            .into_iter()
+            .zip(destinations.iter())
+        {
+            if let Err(e) = client.connect_ports_by_name(own_port, dest) {
+                error!("OUTPUT: failed to connect {own_port} to {dest}: {e}");
+            } else {
+                debug!("OUTPUT: device={device} {own_port} -> {dest}");
+            }
+        }
     }
 
     pub fn set_gate_enabled(&self, enabled: bool) {
@@ -404,6 +518,40 @@ impl Drop for AudioEngine {
     fn drop(&mut self) {
         self.tuner_shutdown.store(true, Ordering::Relaxed);
     }
+}
+
+fn regex_escape(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for c in s.chars() {
+        if "\\.^$|()[]{}*+?".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+/// Ports belonging to `device` with `flags`, ordered by their trailing
+/// channel number rather than lexicographically: a plain string sort puts
+/// `playback_10` before `playback_2` on any device with 10+ ports, which
+/// would connect `out_2` to the wrong physical channel.
+fn matching_ports(client: &Client, device: &str, flags: PortFlags) -> Vec<String> {
+    let mut ports = client.ports(
+        Some(&format!("^{}:", regex_escape(device))),
+        Some("32 bit float mono audio"),
+        flags,
+    );
+    ports.sort_by_key(|p| port_channel_index(p));
+    ports
+}
+
+/// The trailing run of digits in a port name (e.g. `10` for `..._10`), used
+/// as a numeric sort key. Ports with no trailing digits sort first.
+fn port_channel_index(port: &str) -> u32 {
+    port.rsplit(|c: char| !c.is_ascii_digit())
+        .next()
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or(0)
 }
 
 fn load_profile(

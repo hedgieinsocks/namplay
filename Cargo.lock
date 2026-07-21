@@ -744,11 +744,13 @@ dependencies = [
 
 [[package]]
 name = "namplay"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "biquad",
  "env_logger",
  "fft-convolver",
+ "futures-channel",
+ "futures-util",
  "gio",
  "glib",
  "gtk4",

@@ -89,10 +89,26 @@ Gtk.Adjustment eq_lp_adjustment {
   page-increment: 500;
 }
 
+Gtk.StringList buffer_size_model {
+  strings ["32", "64", "128", "256", "512", "1024"]
+}
+
 menu primary_menu {
   item {
     label: "Collapse rows on launch";
     action: "app.collapse-on-launch";
+  }
+
+  section {
+    item {
+      label: "Audio Settings";
+      action: "app.audio-settings";
+    }
+
+    item {
+      label: "Tuner";
+      action: "app.tuner";
+    }
   }
 
   section {
@@ -125,6 +141,91 @@ menu primary_menu {
       action: "app.about";
     }
   }
+}
+
+Adw.Window audio_window {
+  title: "Audio Settings";
+  transient-for: window;
+  default-width: 500;
+  default-height: 400;
+  resizable: false;
+  hide-on-close: true;
+
+  content: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Adw.PreferencesPage {
+      Adw.PreferencesGroup {
+        Adw.ActionRow {
+          title: "Input";
+          subtitle: "devices";
+
+          [suffix]
+          Gtk.DropDown input_device_dropdown {
+            valign: center;
+          }
+
+          [suffix]
+          Gtk.Button input_device_refresh_button {
+            valign: center;
+            icon-name: "view-refresh-symbolic";
+            tooltip-text: "Refresh";
+          }
+        }
+
+        Adw.ActionRow {
+          title: "Output";
+          subtitle: "devices";
+
+          [suffix]
+          Gtk.DropDown output_device_dropdown {
+            valign: center;
+          }
+
+          [suffix]
+          Gtk.Button output_device_refresh_button {
+            valign: center;
+            icon-name: "view-refresh-symbolic";
+            tooltip-text: "Refresh";
+          }
+        }
+
+        Adw.ActionRow {
+          title: "Buffer Size";
+          subtitle: "samples";
+
+          [suffix]
+          Gtk.DropDown buffer_size_dropdown {
+            valign: center;
+            model: buffer_size_model;
+          }
+        }
+
+        Adw.ActionRow {
+          title: "Sample Rate";
+          subtitle: "Hz";
+
+          [suffix]
+          Gtk.Label sample_rate_label {
+            valign: center;
+            styles ["dim-label"]
+          }
+        }
+
+        Adw.ActionRow {
+          title: "Latency";
+          subtitle: "ms";
+
+          [suffix]
+          Gtk.Label latency_label {
+            valign: center;
+            styles ["dim-label"]
+          }
+        }
+      }
+    };
+  };
 }
 
 Adw.Window tuner_window {
@@ -176,12 +277,6 @@ Adw.ApplicationWindow window {
         Gtk.ToggleButton mute_button {
           icon-name: "audio-volume-high-symbolic";
           tooltip-text: "Mute";
-        }
-
-        [start]
-        Gtk.ToggleButton tuner_button {
-          icon-name: "audio-x-generic-symbolic";
-          tooltip-text: "Tuner";
         }
 
         [end]

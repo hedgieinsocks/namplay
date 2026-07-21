@@ -21,6 +21,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 
 * [x] linux-native (no Wine)
 * [x] standalone (no DAW)
+* [x] newbie-friendly (no complex setup)
 * [x] simple (no bloat features)
 * [x] lightweight (low CPU)
 * [x] pretty (feets GNOME desktop)

@@ -231,6 +231,7 @@ fn setup_device_dropdown(
     let dropdown: gtk4::DropDown = builder.object(dropdown_id).expect(dropdown_id);
     let refresh_button: gtk4::Button = builder.object(refresh_button_id).expect(refresh_button_id);
 
+    // Index 0 is always the NONE_LABEL sentinel, so device list positions are offset by 1.
     const NONE_LABEL: &str = "None";
     let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -315,9 +316,9 @@ pub fn setup_preset_actions(
             let yaml = match serde_yaml::to_string(&preset) {
                 Ok(y) => y,
                 Err(e) => {
-                    let msg = format!("PRESET: failed to serialize data: {e}");
-                    error!("{msg}");
-                    show_persistent_toast(&toast_overlay_save, &msg);
+                    let detail = format!("failed to serialize data: {e}");
+                    error!(target: "preset", "{detail}");
+                    show_persistent_toast(&toast_overlay_save, &format!("Preset: {detail}"));
                     return;
                 }
             };
@@ -331,13 +332,13 @@ pub fn setup_preset_actions(
             dialog.save(Some(&win), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
-                        debug!("PRESET: saving file: {}", path.display());
+                        debug!(target: "preset", "saving file: {}", path.display());
                         if let Err(e) = std::fs::write(&path, yaml.as_bytes()) {
-                            let msg = format!("PRESET: failed to save file: {e}");
-                            error!("{msg}");
-                            show_persistent_toast(&toast_overlay, &msg);
+                            let detail = format!("failed to save file: {e}");
+                            error!(target: "preset", "{detail}");
+                            show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
                         } else {
-                            debug!("PRESET: file saved: {}", path.display());
+                            debug!(target: "preset", "file saved: {}", path.display());
                         }
                     }
                 }
@@ -369,26 +370,26 @@ pub fn setup_preset_actions(
             dialog.open(Some(&win), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
-                        debug!("PRESET: loading file: {}", path.display());
+                        debug!(target: "preset", "loading file: {}", path.display());
                         let content = match std::fs::read_to_string(&path) {
                             Ok(c) => c,
                             Err(e) => {
-                                let msg = format!("PRESET: failed to load file: {e}");
-                                error!("{msg}");
-                                show_persistent_toast(&toast_overlay, &msg);
+                                let detail = format!("failed to load file: {e}");
+                                error!(target: "preset", "{detail}");
+                                show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
                                 return;
                             }
                         };
                         let preset = match serde_yaml::from_str::<Preset>(&content) {
                             Ok(p) => p,
                             Err(e) => {
-                                let msg = format!("PRESET: invalid format: {e}");
-                                error!("{msg}");
-                                show_persistent_toast(&toast_overlay, &msg);
+                                let detail = format!("invalid format: {e}");
+                                error!(target: "preset", "{detail}");
+                                show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
                                 return;
                             }
                         };
-                        debug!("PRESET: file loaded: {}", path.display());
+                        debug!(target: "preset", "file loaded: {}", path.display());
                         preset.apply(&settings);
                     }
                 }

@@ -170,23 +170,23 @@ fn build_ui(app: &adw::Application) {
             let engine = Rc::new(engine);
             setup_device_rows(&builder, &settings, Rc::clone(&engine));
 
-            wire_toggle_button(&builder, "mute_button", "MUTE", Arc::clone(&engine.mute));
+            wire_toggle_button(&builder, "mute_button", "mute", Arc::clone(&engine.mute));
             wire_toggle_button(
                 &builder,
                 "pedal_profile_bypass_button",
-                "PEDAL",
+                "pedal",
                 Arc::clone(&engine.pedal_bypass),
             );
             wire_toggle_button(
                 &builder,
                 "amp_profile_bypass_button",
-                "AMP",
+                "amp",
                 Arc::clone(&engine.amp_bypass),
             );
             wire_toggle_button(
                 &builder,
                 "ir_bypass_button",
-                "IR",
+                "ir",
                 Arc::clone(&engine.ir_bypass),
             );
 
@@ -209,12 +209,12 @@ fn build_ui(app: &adw::Application) {
 
             let tuner_enabled = Arc::clone(&engine.tuner_enabled);
             tuner_window.connect_show(move |_| {
-                debug!("TUNER: state=on");
+                debug!(target: "tuner", "state=on");
                 tuner_enabled.store(true, Ordering::Relaxed);
             });
             let tuner_enabled = Arc::clone(&engine.tuner_enabled);
             tuner_window.connect_hide(move |_| {
-                debug!("TUNER: state=off");
+                debug!(target: "tuner", "state=off");
                 tuner_enabled.store(false, Ordering::Relaxed);
             });
 
@@ -276,7 +276,7 @@ fn build_ui(app: &adw::Application) {
         }
         Err(e) => {
             let msg = format!("Audio unavailable: {e}");
-            error!("{msg}");
+            error!(target: "audio", "{msg}");
             let toast_overlay: adw::ToastOverlay =
                 builder.object("toast_overlay").expect("toast_overlay");
             show_persistent_toast(&toast_overlay, &msg);
@@ -363,7 +363,7 @@ fn wire_toggle_button(
     let btn: gtk4::ToggleButton = builder.object(id).expect(id);
     btn.connect_toggled(move |btn| {
         let active = btn.is_active();
-        debug!("{label}: {}", if active { "on" } else { "off" });
+        debug!(target: label, "{}", if active { "on" } else { "off" });
         btn.set_icon_name(if active {
             "audio-volume-muted-symbolic"
         } else {

@@ -31,12 +31,12 @@ fn load_wav_channels(
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
-        let msg = format!(
-            "IR: file sample rate {}Hz != JACK sample rate {}Hz",
+        let detail = format!(
+            "file sample rate {}Hz != JACK sample rate {}Hz",
             spec.sample_rate, jack_sample_rate
         );
-        warn!("{msg}");
-        let _ = warning_tx.unbounded_send(msg);
+        warn!(target: "ir", "{detail}");
+        let _ = warning_tx.unbounded_send(format!("IR: {detail}"));
     }
     let channels = spec.channels as usize;
     let samples: Vec<f32> = match spec.sample_format {

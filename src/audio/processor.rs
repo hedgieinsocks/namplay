@@ -12,7 +12,7 @@ use fft_convolver::FFTConvolver;
 use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
 use nam_rs::Model;
 
-use super::dsp::{AtomicF32, Eq, NoiseGate};
+use super::dsp::{AtomicF32, EqChannel, EqCoeffs, NoiseGate};
 use super::ir::IrConvolvers;
 use super::EqPosition;
 
@@ -43,8 +43,9 @@ pub(super) struct NamProcessor {
     pub(super) eq_high_db: Arc<AtomicF32>,
     pub(super) eq_hp_freq: Arc<AtomicF32>,
     pub(super) eq_lp_freq: Arc<AtomicF32>,
-    pub(super) eq_l: Eq,
-    pub(super) eq_r: Eq,
+    pub(super) eq_coeffs: EqCoeffs,
+    pub(super) eq_l: EqChannel,
+    pub(super) eq_r: EqChannel,
     pub(super) conv_buf: Vec<f32>,
     pub(super) in_port: jack::Port<AudioIn>,
     pub(super) out_port_1: jack::Port<AudioOut>,
@@ -120,9 +121,7 @@ impl ProcessHandler for NamProcessor {
         let eq_high_db = self.eq_high_db.get();
         let eq_hp_freq = self.eq_hp_freq.get();
         let eq_lp_freq = self.eq_lp_freq.get();
-        self.eq_l
-            .update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
-        self.eq_r
+        self.eq_coeffs
             .update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
 
         let pedal_bypass = self.pedal_bypass.load(Ordering::Relaxed);
@@ -147,7 +146,7 @@ impl ProcessHandler for NamProcessor {
         }
 
         if eq_enabled && eq_pos == EqPosition::PrePedal {
-            self.eq_l.process_buffer(out_l);
+            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !pedal_bypass {
@@ -159,7 +158,7 @@ impl ProcessHandler for NamProcessor {
         }
 
         if eq_enabled && eq_pos == EqPosition::PreAmp {
-            self.eq_l.process_buffer(out_l);
+            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !amp_bypass {
@@ -187,9 +186,9 @@ impl ProcessHandler for NamProcessor {
         }
 
         if eq_enabled && eq_pos == EqPosition::PostIr {
-            self.eq_l.process_buffer(out_l);
+            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
             if stereo_ir {
-                self.eq_r.process_buffer(out_r);
+                self.eq_r.process_buffer(out_r, &self.eq_coeffs);
             }
         }
 

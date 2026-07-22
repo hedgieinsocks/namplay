@@ -21,9 +21,19 @@ use nam_rs::{Model, NamModel};
 const MAX_BLOCK_SIZE: usize = 8192;
 
 pub(crate) use dsp::AtomicF32;
-use dsp::{db_to_gain, Eq, NoiseGate};
+use dsp::{db_to_gain, EqChannel, EqCoeffs, NoiseGate};
 use ir::IrConvolvers;
 use processor::NamProcessor;
+
+struct Notifications;
+
+impl jack::NotificationHandler for Notifications {
+    // Runs on JACK's notification thread, not the RT process thread, so logging here is fine.
+    fn xrun(&mut self, _: &Client) -> jack::Control {
+        warn!(target: "jack", "xrun (buffer under/overrun)");
+        jack::Control::Continue
+    }
+}
 
 /// Where the EQ sits in the signal chain. The discriminants match both the
 /// order of the EQ position dropdown in `window.blp` and the values stored
@@ -113,7 +123,7 @@ pub struct AudioEngine {
     eq_high_db: Arc<AtomicF32>,
     eq_hp_freq: Arc<AtomicF32>,
     eq_lp_freq: Arc<AtomicF32>,
-    _client: jack::AsyncClient<(), NamProcessor>,
+    _client: jack::AsyncClient<Notifications, NamProcessor>,
     sample_rate: u32,
     block_size: usize,
     pub tuner_hz_rx: RefCell<Option<futures_channel::mpsc::UnboundedReceiver<f32>>>,
@@ -130,19 +140,16 @@ impl AudioEngine {
 
         let (warning_tx, warning_rx) = futures_channel::mpsc::unbounded();
 
-        debug!("JACK: buffer_size={}", params.buffer_size);
+        debug!(target: "jack", "buffer_size={}", params.buffer_size);
         if let Err(e) = client.set_buffer_size(params.buffer_size) {
-            let msg = format!(
-                "JACK: failed to set buffer size to {}: {e}",
-                params.buffer_size
-            );
-            warn!("{msg}");
-            let _ = warning_tx.unbounded_send(msg);
+            let detail = format!("failed to set buffer size to {}: {e}", params.buffer_size);
+            warn!(target: "jack", "{detail}");
+            let _ = warning_tx.unbounded_send(format!("JACK: {detail}"));
         }
 
         let sample_rate = client.sample_rate();
         let block_size = client.buffer_size() as usize;
-        debug!("JACK: state=connected sample_rate={sample_rate}Hz");
+        debug!(target: "jack", "state=connected sample_rate={sample_rate}Hz");
 
         let in_port = client
             .register_port("input", AudioIn::default())
@@ -180,21 +187,25 @@ impl AudioEngine {
         let eq_lp_freq = Arc::new(AtomicF32::new(params.eq_lp_freq));
 
         debug!(
-            "GATE: state={} threshold={}dB",
+            target: "gate",
+            "state={} threshold={}dB",
             if params.gate_enabled { "on" } else { "off" },
             params.gate_threshold_db
         );
         debug!(
-            "PEDAL: in={}dB out={}dB",
+            target: "pedal",
+            "in={}dB out={}dB",
             params.pedal_in_gain_db, params.pedal_out_gain_db
         );
         debug!(
-            "AMP: in={}dB out={}dB",
+            target: "amp",
+            "in={}dB out={}dB",
             params.amp_in_gain_db, params.amp_out_gain_db
         );
-        debug!("IR: level={}dB", params.ir_level_db);
+        debug!(target: "ir", "level={}dB", params.ir_level_db);
         debug!(
-            "EQ: state={} position={} low={}dB mid={}dB high={}dB hp={}Hz lp={}Hz",
+            target: "eq",
+            "state={} position={} low={}dB mid={}dB high={}dB hp={}Hz lp={}Hz",
             if params.eq_enabled { "on" } else { "off" },
             params.eq_pos.setting(),
             params.eq_low_db,
@@ -216,16 +227,14 @@ impl AudioEngine {
             tuner_hz_tx,
         );
 
-        let make_eq = || {
-            Eq::new(
-                params.eq_low_db,
-                params.eq_mid_db,
-                params.eq_high_db,
-                params.eq_hp_freq,
-                params.eq_lp_freq,
-                sample_rate as f32,
-            )
-        };
+        let eq_coeffs = EqCoeffs::new(
+            params.eq_low_db,
+            params.eq_mid_db,
+            params.eq_high_db,
+            params.eq_hp_freq,
+            params.eq_lp_freq,
+            sample_rate as f32,
+        );
 
         let processor = NamProcessor {
             mute: Arc::clone(&mute),
@@ -254,8 +263,9 @@ impl AudioEngine {
             eq_high_db: Arc::clone(&eq_high_db),
             eq_hp_freq: Arc::clone(&eq_hp_freq),
             eq_lp_freq: Arc::clone(&eq_lp_freq),
-            eq_l: make_eq(),
-            eq_r: make_eq(),
+            eq_coeffs,
+            eq_l: EqChannel::new(),
+            eq_r: EqChannel::new(),
             conv_buf: vec![0.0f32; MAX_BLOCK_SIZE],
             in_port,
             out_port_1,
@@ -265,7 +275,7 @@ impl AudioEngine {
         };
 
         let active_client = client
-            .activate_async((), processor)
+            .activate_async(Notifications, processor)
             .map_err(|e| format!("JACK: activation failed: {e}"))?;
 
         let engine = AudioEngine {
@@ -320,11 +330,11 @@ impl AudioEngine {
     }
 
     pub fn set_buffer_size(&self, frames: u32) {
-        debug!("JACK: buffer_size={frames}");
+        debug!(target: "jack", "buffer_size={frames}");
         if let Err(e) = self._client.as_client().set_buffer_size(frames) {
-            let msg = format!("JACK: failed to set buffer size to {frames}: {e}");
-            error!("{msg}");
-            let _ = self.warning_tx.unbounded_send(msg);
+            let detail = format!("failed to set buffer size to {frames}: {e}");
+            error!(target: "jack", "{detail}");
+            let _ = self.warning_tx.unbounded_send(format!("JACK: {detail}"));
         }
     }
 
@@ -358,7 +368,7 @@ impl AudioEngine {
         }
 
         let Some(device) = device else {
-            debug!("INPUT: device cleared");
+            debug!(target: "input", "device cleared");
             return;
         };
 
@@ -367,17 +377,17 @@ impl AudioEngine {
         match sources.first() {
             Some(source) => {
                 if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
-                    let msg = format!("INPUT: failed to connect {source}: {e}");
-                    error!("{msg}");
-                    let _ = self.warning_tx.unbounded_send(msg);
+                    let detail = format!("failed to connect {source}: {e}");
+                    error!(target: "input", "{detail}");
+                    let _ = self.warning_tx.unbounded_send(format!("Input: {detail}"));
                 } else {
-                    debug!("INPUT: device={device} port={source}");
+                    debug!(target: "input", "device={device} port={source}");
                 }
             }
             None => {
-                let msg = format!("INPUT: device not found: {device}");
-                warn!("{msg}");
-                let _ = self.warning_tx.unbounded_send(msg);
+                let detail = format!("device not found: {device}");
+                warn!(target: "input", "{detail}");
+                let _ = self.warning_tx.unbounded_send(format!("Input: {detail}"));
             }
         }
     }
@@ -392,16 +402,16 @@ impl AudioEngine {
         }
 
         let Some(device) = device else {
-            debug!("OUTPUT: device cleared");
+            debug!(target: "output", "device cleared");
             return;
         };
 
         let destinations = matching_ports(client, &device, PortFlags::IS_INPUT);
 
         if destinations.is_empty() {
-            let msg = format!("OUTPUT: device not found: {device}");
-            warn!("{msg}");
-            let _ = self.warning_tx.unbounded_send(msg);
+            let detail = format!("device not found: {device}");
+            warn!(target: "output", "{detail}");
+            let _ = self.warning_tx.unbounded_send(format!("Output: {detail}"));
             return;
         }
 
@@ -410,28 +420,28 @@ impl AudioEngine {
             .zip(destinations.iter())
         {
             if let Err(e) = client.connect_ports_by_name(own_port, dest) {
-                let msg = format!("OUTPUT: failed to connect {own_port} to {dest}: {e}");
-                error!("{msg}");
-                let _ = self.warning_tx.unbounded_send(msg);
+                let detail = format!("failed to connect {own_port} to {dest}: {e}");
+                error!(target: "output", "{detail}");
+                let _ = self.warning_tx.unbounded_send(format!("Output: {detail}"));
             } else {
-                debug!("OUTPUT: device={device} {own_port} -> {dest}");
+                debug!(target: "output", "device={device} {own_port} -> {dest}");
             }
         }
     }
 
     pub fn set_gate_enabled(&self, enabled: bool) {
-        debug!("GATE: state={}", if enabled { "on" } else { "off" });
+        debug!(target: "gate", "state={}", if enabled { "on" } else { "off" });
         self.gate_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn set_gate_threshold_db(&self, db: f32) {
-        debug!("GATE: threshold={db}dB");
+        debug!(target: "gate", "threshold={db}dB");
         self.gate_threshold_db.set(db);
     }
 
     pub fn load_pedal_profile(&self, path: Option<String>) {
         load_profile(
-            "PEDAL",
+            "Pedal",
             self.pedal_profile_tx.clone(),
             path,
             self.sample_rate,
@@ -441,18 +451,18 @@ impl AudioEngine {
     }
 
     pub fn set_pedal_in_gain_db(&self, db: f32) {
-        debug!("PEDAL: in={db}dB");
+        debug!(target: "pedal", "in={db}dB");
         self.pedal_in_gain.set(db_to_gain(db));
     }
 
     pub fn set_pedal_out_gain_db(&self, db: f32) {
-        debug!("PEDAL: out={db}dB");
+        debug!(target: "pedal", "out={db}dB");
         self.pedal_out_gain.set(db_to_gain(db));
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
         load_profile(
-            "AMP",
+            "Amp",
             self.amp_profile_tx.clone(),
             path,
             self.sample_rate,
@@ -462,12 +472,12 @@ impl AudioEngine {
     }
 
     pub fn set_amp_in_gain_db(&self, db: f32) {
-        debug!("AMP: in={db}dB");
+        debug!(target: "amp", "in={db}dB");
         self.amp_in_gain.set(db_to_gain(db));
     }
 
     pub fn set_amp_out_gain_db(&self, db: f32) {
-        debug!("AMP: out={db}dB");
+        debug!(target: "amp", "out={db}dB");
         self.amp_out_gain.set(db_to_gain(db));
     }
 
@@ -479,18 +489,18 @@ impl AudioEngine {
         std::thread::spawn(move || {
             let convolvers = match path {
                 None => {
-                    debug!("IR: file cleared");
+                    debug!(target: "ir", "file cleared");
                     None
                 }
                 Some(p) => {
-                    debug!("IR: loading file: {p}");
+                    debug!(target: "ir", "loading file: {p}");
                     let result = ir::load(&p, sample_rate, block_size, &warning_tx);
                     if result.is_some() {
-                        debug!("IR: file loaded: {p}");
+                        debug!(target: "ir", "file loaded: {p}");
                     } else {
-                        let msg = format!("IR: failed to load file: {p}");
-                        error!("{msg}");
-                        let _ = warning_tx.unbounded_send(msg);
+                        let detail = format!("failed to load file: {p}");
+                        error!(target: "ir", "{detail}");
+                        let _ = warning_tx.unbounded_send(format!("IR: {detail}"));
                     }
                     result
                 }
@@ -500,42 +510,42 @@ impl AudioEngine {
     }
 
     pub fn set_ir_level_db(&self, db: f32) {
-        debug!("IR: level={db}dB");
+        debug!(target: "ir", "level={db}dB");
         self.ir_level.set(db_to_gain(db));
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {
-        debug!("EQ: state={}", if enabled { "on" } else { "off" });
+        debug!(target: "eq", "state={}", if enabled { "on" } else { "off" });
         self.eq_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub fn set_eq_pos(&self, pos: EqPosition) {
-        debug!("EQ: position={}", pos.setting());
+        debug!(target: "eq", "position={}", pos.setting());
         self.eq_pos.store(pos.index(), Ordering::Relaxed);
     }
 
     pub fn set_eq_low_db(&self, db: f32) {
-        debug!("EQ: low={db}dB");
+        debug!(target: "eq", "low={db}dB");
         self.eq_low_db.set(db);
     }
 
     pub fn set_eq_mid_db(&self, db: f32) {
-        debug!("EQ: mid={db}dB");
+        debug!(target: "eq", "mid={db}dB");
         self.eq_mid_db.set(db);
     }
 
     pub fn set_eq_high_db(&self, db: f32) {
-        debug!("EQ: high={db}dB");
+        debug!(target: "eq", "high={db}dB");
         self.eq_high_db.set(db);
     }
 
     pub fn set_eq_hp_freq(&self, hz: f32) {
-        debug!("EQ: high-pass={hz}Hz");
+        debug!(target: "eq", "high-pass={hz}Hz");
         self.eq_hp_freq.set(hz);
     }
 
     pub fn set_eq_lp_freq(&self, hz: f32) {
-        debug!("EQ: low-pass={hz}Hz");
+        debug!(target: "eq", "low-pass={hz}Hz");
         self.eq_lp_freq.set(hz);
     }
 }
@@ -589,30 +599,33 @@ fn load_profile(
     warning_tx: UnboundedSender<String>,
 ) {
     std::thread::spawn(move || {
+        let target = label.to_lowercase();
         let profile = match path {
             None => {
-                debug!("{label}: profile cleared");
+                debug!(target: &target, "profile cleared");
                 *loudness_out.lock().unwrap() = None;
                 None
             }
             Some(p) => {
-                debug!("{label}: loading profile: {p}");
+                debug!(target: &target, "loading profile: {p}");
                 let model = NamModel::from_file(&p).ok().and_then(|nm| {
                     let model_sr = nm.expected_sample_rate() as u32;
                     if model_sr != sample_rate {
-                        let msg = format!("{label}: profile sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz");
-                        warn!("{msg}");
-                        let _ = warning_tx.unbounded_send(msg);
+                        let detail = format!(
+                            "profile sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz"
+                        );
+                        warn!(target: &target, "{detail}");
+                        let _ = warning_tx.unbounded_send(format!("{label}: {detail}"));
                     }
                     *loudness_out.lock().unwrap() = nm.loudness();
                     Model::from_nam(&nm).ok()
                 });
                 if model.is_some() {
-                    debug!("{label}: profile loaded: {p}");
+                    debug!(target: &target, "profile loaded: {p}");
                 } else {
-                    let msg = format!("{label}: failed to load profile: {p}");
-                    error!("{msg}");
-                    let _ = warning_tx.unbounded_send(msg);
+                    let detail = format!("failed to load profile: {p}");
+                    error!(target: &target, "{detail}");
+                    let _ = warning_tx.unbounded_send(format!("{label}: {detail}"));
                     *loudness_out.lock().unwrap() = None;
                 }
                 model

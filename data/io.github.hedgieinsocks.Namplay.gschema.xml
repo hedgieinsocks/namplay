@@ -32,41 +32,41 @@
       <summary>JACK buffer size in frames</summary>
     </key>
 
-    <key name="noise-gate-enabled" type="b">
+    <key name="gate-enabled" type="b">
       <default>false</default>
       <summary>Noise gate enabled</summary>
     </key>
-    <key name="noise-gate-threshold" type="d">
+    <key name="gate-threshold" type="d">
       <range min="-80" max="-20"/>
       <default>-60</default>
       <summary>Noise gate threshold in dB</summary>
     </key>
 
-    <key name="pedal-profile-path" type="s">
+    <key name="pedal-path" type="s">
       <default>''</default>
       <summary>Path to the selected pedal profile file</summary>
     </key>
-    <key name="pedal-profile-input" type="d">
+    <key name="pedal-input" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
       <summary>Pedal profile input gain in dB</summary>
     </key>
-    <key name="pedal-profile-output" type="d">
+    <key name="pedal-output" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
       <summary>Pedal profile output gain in dB</summary>
     </key>
 
-    <key name="amp-profile-path" type="s">
+    <key name="amp-path" type="s">
       <default>''</default>
       <summary>Path to the selected amp profile file</summary>
     </key>
-    <key name="amp-profile-input" type="d">
+    <key name="amp-input" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
       <summary>Amp profile input gain in dB</summary>
     </key>
-    <key name="amp-profile-output" type="d">
+    <key name="amp-output" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
       <summary>Amp profile output gain in dB</summary>

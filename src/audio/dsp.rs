@@ -1,5 +1,6 @@
 //! DSP building blocks: noise gate, 3-band EQ with high/low-pass filters,
-//! and the atomic f32 used to share parameters with the real-time thread.
+//! the EQ's position in the signal chain, and the atomic f32 used to share
+//! parameters with the real-time thread.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -10,6 +11,47 @@ const EQ_MID_FREQ: f32 = 425.0;
 const EQ_HIGH_FREQ: f32 = 1800.0;
 const EQ_MID_Q_CUT: f32 = 1.5;
 const EQ_MID_Q_BOOST: f32 = 0.7;
+
+/// Where the EQ sits in the signal chain. The discriminants match both the
+/// order of the EQ position dropdown in `window.blp` and the values stored
+/// in the processor's atomic.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum EqPosition {
+    PrePedal = 0,
+    PreAmp = 1,
+    PostIr = 2,
+}
+
+impl EqPosition {
+    pub fn from_index(index: u32) -> Self {
+        match index {
+            0 => Self::PrePedal,
+            2 => Self::PostIr,
+            _ => Self::PreAmp,
+        }
+    }
+
+    pub fn from_setting(setting: &str) -> Self {
+        match setting {
+            "pre-pedal" => Self::PrePedal,
+            "post-ir" => Self::PostIr,
+            _ => Self::PreAmp,
+        }
+    }
+
+    pub fn index(self) -> u32 {
+        self as u32
+    }
+
+    pub fn setting(self) -> &'static str {
+        match self {
+            Self::PrePedal => "pre-pedal",
+            Self::PreAmp => "pre-amp",
+            Self::PostIr => "post-ir",
+        }
+    }
+}
 
 pub(crate) struct AtomicF32(AtomicU32);
 
@@ -56,7 +98,7 @@ impl NoiseGate {
     }
 
     // update() runs every RT process() call; skip recompute when threshold unchanged
-    // since last call, same dirty-check pattern as Eq::update.
+    // since last call, same dirty-check pattern as EqCoeffs::update.
     pub(super) fn update(&mut self, threshold_db: f32) {
         if threshold_db != self.last_threshold_db {
             self.open_threshold = db_to_gain(threshold_db);

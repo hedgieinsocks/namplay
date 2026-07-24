@@ -231,7 +231,6 @@ fn setup_device_dropdown(
     let dropdown: gtk4::DropDown = builder.object(dropdown_id).expect(dropdown_id);
     let refresh_button: gtk4::Button = builder.object(refresh_button_id).expect(refresh_button_id);
 
-    // Index 0 is always the NONE_LABEL sentinel, so device list positions are offset by 1.
     const NONE_LABEL: &str = "None";
     let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -248,17 +247,7 @@ fn setup_device_dropdown(
                 model.append(device);
             }
             dropdown.set_model(Some(&model));
-
-            let selected = if current.is_empty() {
-                0
-            } else {
-                devices
-                    .iter()
-                    .position(|d| d == &current)
-                    .map(|i| i as u32 + 1)
-                    .unwrap_or(0)
-            };
-            dropdown.set_selected(selected);
+            dropdown.set_selected(selected_index(&current, &devices));
         }
     });
 
@@ -281,22 +270,25 @@ fn setup_device_dropdown(
     let known_c = Rc::clone(&known);
     settings.connect_changed(Some(key), move |s, k| {
         let current = s.string(k).to_string();
-        let devices = known_c.borrow();
-        let selected = if current.is_empty() {
-            0
-        } else {
-            devices
-                .iter()
-                .position(|d| d == &current)
-                .map(|i| i as u32 + 1)
-                .unwrap_or(0)
-        };
-        dropdown_c.set_selected(selected);
+        dropdown_c.set_selected(selected_index(&current, &known_c.borrow()));
     });
 
     refresh_button.connect_clicked(move |_| {
         rebuild(list_devices(&engine));
     });
+}
+
+/// Index 0 is the NONE_LABEL sentinel; device list positions are offset by 1.
+fn selected_index(current: &str, devices: &[String]) -> u32 {
+    if current.is_empty() {
+        0
+    } else {
+        devices
+            .iter()
+            .position(|d| d == current)
+            .map(|i| i as u32 + 1)
+            .unwrap_or(0)
+    }
 }
 
 pub fn setup_preset_actions(

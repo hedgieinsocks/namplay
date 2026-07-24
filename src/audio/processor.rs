@@ -20,7 +20,7 @@ pub(super) struct NamProcessor {
     pub(super) mute: Arc<AtomicBool>,
     pub(super) gate_enabled: Arc<AtomicBool>,
     pub(super) gate_threshold_db: Arc<AtomicF32>,
-    pub(super) noise_gate: NoiseGate,
+    pub(super) gate: NoiseGate,
     pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_pedal_profile: Option<Model>,
     pub(super) pedal_bypass: Arc<AtomicBool>,
@@ -112,17 +112,21 @@ impl ProcessHandler for NamProcessor {
         }
 
         let gate_enabled = self.gate_enabled.load(Ordering::Relaxed);
-        self.noise_gate.update(self.gate_threshold_db.get());
+        if gate_enabled {
+            self.gate.update(self.gate_threshold_db.get());
+        }
 
         let eq_enabled = self.eq_enabled.load(Ordering::Relaxed);
         let eq_pos = EqPosition::from_index(self.eq_pos.load(Ordering::Relaxed));
-        let eq_low_db = self.eq_low_db.get();
-        let eq_mid_db = self.eq_mid_db.get();
-        let eq_high_db = self.eq_high_db.get();
-        let eq_hp_freq = self.eq_hp_freq.get();
-        let eq_lp_freq = self.eq_lp_freq.get();
-        self.eq_coeffs
-            .update(eq_low_db, eq_mid_db, eq_high_db, eq_hp_freq, eq_lp_freq);
+        if eq_enabled {
+            self.eq_coeffs.update(
+                self.eq_low_db.get(),
+                self.eq_mid_db.get(),
+                self.eq_high_db.get(),
+                self.eq_hp_freq.get(),
+                self.eq_lp_freq.get(),
+            );
+        }
 
         let pedal_bypass = self.pedal_bypass.load(Ordering::Relaxed);
         let pedal_in_gain = self.pedal_in_gain.get();
@@ -139,7 +143,7 @@ impl ProcessHandler for NamProcessor {
 
         for (o, &i) in out_l.iter_mut().zip(input) {
             *o = if gate_enabled {
-                self.noise_gate.process_sample(i)
+                self.gate.process_sample(i)
             } else {
                 i
             };

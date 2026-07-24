@@ -1,9 +1,11 @@
 //! JACK audio engine: owns the client and hands parameter changes to the
 //! real-time processor via atomics and channels.
 
+mod devices;
 mod dsp;
 mod ir;
 mod processor;
+mod profile;
 mod tuner;
 
 use std::cell::RefCell;
@@ -16,11 +18,12 @@ use std::sync::{
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use jack::{AudioIn, AudioOut, Client, ClientOptions, PortFlags};
 use log::{debug, error, warn};
-use nam_rs::{Model, NamModel};
+use nam_rs::Model;
 
 const MAX_BLOCK_SIZE: usize = 8192;
 
 pub(crate) use dsp::AtomicF32;
+pub use dsp::EqPosition;
 use dsp::{db_to_gain, EqChannel, EqCoeffs, NoiseGate};
 use ir::IrConvolvers;
 use processor::NamProcessor;
@@ -28,51 +31,11 @@ use processor::NamProcessor;
 struct Notifications;
 
 impl jack::NotificationHandler for Notifications {
-    // Runs on JACK's notification thread, not the RT process thread, so logging here is fine.
+    // Runs on JACK's notification thread, not the RT process thread, so logging
+    // here is fine.
     fn xrun(&mut self, _: &Client) -> jack::Control {
         warn!(target: "jack", "xrun (buffer under/overrun)");
         jack::Control::Continue
-    }
-}
-
-/// Where the EQ sits in the signal chain. The discriminants match both the
-/// order of the EQ position dropdown in `window.blp` and the values stored
-/// in the processor's atomic.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[repr(u32)]
-pub enum EqPosition {
-    PrePedal = 0,
-    PreAmp = 1,
-    PostIr = 2,
-}
-
-impl EqPosition {
-    pub fn from_index(index: u32) -> Self {
-        match index {
-            0 => Self::PrePedal,
-            2 => Self::PostIr,
-            _ => Self::PreAmp,
-        }
-    }
-
-    pub fn from_setting(setting: &str) -> Self {
-        match setting {
-            "pre-pedal" => Self::PrePedal,
-            "post-ir" => Self::PostIr,
-            _ => Self::PreAmp,
-        }
-    }
-
-    pub fn index(self) -> u32 {
-        self as u32
-    }
-
-    pub fn setting(self) -> &'static str {
-        match self {
-            Self::PrePedal => "pre-pedal",
-            Self::PreAmp => "pre-amp",
-            Self::PostIr => "post-ir",
-        }
     }
 }
 
@@ -240,7 +203,7 @@ impl AudioEngine {
             mute: Arc::clone(&mute),
             gate_enabled: Arc::clone(&gate_enabled),
             gate_threshold_db: Arc::clone(&gate_threshold_db),
-            noise_gate: NoiseGate::new(params.gate_threshold_db, sample_rate),
+            gate: NoiseGate::new(params.gate_threshold_db, sample_rate),
             pedal_profile_rx,
             current_pedal_profile: None,
             pedal_bypass: Arc::clone(&pedal_bypass),
@@ -338,26 +301,12 @@ impl AudioEngine {
         }
     }
 
-    fn audio_devices(&self, flags: PortFlags) -> Vec<String> {
-        let client = self._client.as_client();
-        let own_name = client.name();
-        let mut names: Vec<String> = client
-            .ports(None, Some("32 bit float mono audio"), flags)
-            .iter()
-            .filter_map(|port| port.split_once(':').map(|(node, _)| node.to_string()))
-            .filter(|node| node != own_name)
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-
     pub fn input_devices(&self) -> Vec<String> {
-        self.audio_devices(PortFlags::IS_OUTPUT)
+        devices::audio_devices(self._client.as_client(), PortFlags::IS_OUTPUT)
     }
 
     pub fn output_devices(&self) -> Vec<String> {
-        self.audio_devices(PortFlags::IS_INPUT)
+        devices::audio_devices(self._client.as_client(), PortFlags::IS_INPUT)
     }
 
     pub fn set_input_device(&self, device: Option<String>) {
@@ -372,7 +321,7 @@ impl AudioEngine {
             return;
         };
 
-        let sources = matching_ports(client, &device, PortFlags::IS_OUTPUT);
+        let sources = devices::matching_ports(client, &device, PortFlags::IS_OUTPUT);
 
         match sources.first() {
             Some(source) => {
@@ -406,7 +355,7 @@ impl AudioEngine {
             return;
         };
 
-        let destinations = matching_ports(client, &device, PortFlags::IS_INPUT);
+        let destinations = devices::matching_ports(client, &device, PortFlags::IS_INPUT);
 
         if destinations.is_empty() {
             let detail = format!("device not found: {device}");
@@ -440,7 +389,7 @@ impl AudioEngine {
     }
 
     pub fn load_pedal_profile(&self, path: Option<String>) {
-        load_profile(
+        profile::load(
             "Pedal",
             self.pedal_profile_tx.clone(),
             path,
@@ -461,7 +410,7 @@ impl AudioEngine {
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
-        load_profile(
+        profile::load(
             "Amp",
             self.amp_profile_tx.clone(),
             path,
@@ -554,83 +503,4 @@ impl Drop for AudioEngine {
     fn drop(&mut self) {
         self.tuner_shutdown.store(true, Ordering::Relaxed);
     }
-}
-
-fn regex_escape(s: &str) -> String {
-    let mut escaped = String::with_capacity(s.len());
-    for c in s.chars() {
-        if "\\.^$|()[]{}*+?".contains(c) {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    escaped
-}
-
-/// Ports belonging to `device` with `flags`, ordered by their trailing
-/// channel number rather than lexicographically: a plain string sort puts
-/// `playback_10` before `playback_2` on any device with 10+ ports, which
-/// would connect `out_2` to the wrong physical channel.
-fn matching_ports(client: &Client, device: &str, flags: PortFlags) -> Vec<String> {
-    let mut ports = client.ports(
-        Some(&format!("^{}:", regex_escape(device))),
-        Some("32 bit float mono audio"),
-        flags,
-    );
-    ports.sort_by_key(|p| port_channel_index(p));
-    ports
-}
-
-/// The trailing run of digits in a port name (e.g. `10` for `..._10`), used
-/// as a numeric sort key. Ports with no trailing digits sort first.
-fn port_channel_index(port: &str) -> u32 {
-    port.rsplit(|c: char| !c.is_ascii_digit())
-        .next()
-        .and_then(|digits| digits.parse().ok())
-        .unwrap_or(0)
-}
-
-fn load_profile(
-    label: &'static str,
-    tx: mpsc::Sender<Option<Model>>,
-    path: Option<String>,
-    sample_rate: u32,
-    loudness_out: Arc<Mutex<Option<f32>>>,
-    warning_tx: UnboundedSender<String>,
-) {
-    std::thread::spawn(move || {
-        let target = label.to_lowercase();
-        let profile = match path {
-            None => {
-                debug!(target: &target, "profile cleared");
-                *loudness_out.lock().unwrap() = None;
-                None
-            }
-            Some(p) => {
-                debug!(target: &target, "loading profile: {p}");
-                let model = NamModel::from_file(&p).ok().and_then(|nm| {
-                    let model_sr = nm.expected_sample_rate() as u32;
-                    if model_sr != sample_rate {
-                        let detail = format!(
-                            "profile sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz"
-                        );
-                        warn!(target: &target, "{detail}");
-                        let _ = warning_tx.unbounded_send(format!("{label}: {detail}"));
-                    }
-                    *loudness_out.lock().unwrap() = nm.loudness();
-                    Model::from_nam(&nm).ok()
-                });
-                if model.is_some() {
-                    debug!(target: &target, "profile loaded: {p}");
-                } else {
-                    let detail = format!("failed to load profile: {p}");
-                    error!(target: &target, "{detail}");
-                    let _ = warning_tx.unbounded_send(format!("{label}: {detail}"));
-                    *loudness_out.lock().unwrap() = None;
-                }
-                model
-            }
-        };
-        let _ = tx.send(profile);
-    });
 }

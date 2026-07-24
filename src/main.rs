@@ -31,15 +31,15 @@ const TARGET_LOUDNESS_LUFS: f64 = -18.0;
 /// File-backed rows; widget ids are derived from `prefix` (see `FilePickerSpec`).
 const FILE_PICKERS: &[FilePickerSpec] = &[
     FilePickerSpec {
-        prefix: "pedal_profile",
-        key: "pedal-profile-path",
+        prefix: "pedal",
+        key: "pedal-path",
         title: "Choose Pedal Profile",
         filter_name: "NAM Profiles",
         filter_suffix: "nam",
     },
     FilePickerSpec {
-        prefix: "amp_profile",
-        key: "amp-profile-path",
+        prefix: "amp",
+        key: "amp-path",
         title: "Choose Amp Profile",
         filter_name: "NAM Profiles",
         filter_suffix: "nam",
@@ -56,27 +56,21 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
 /// Settings keys of the sliders; the matching adjustment and reset button ids
 /// are `{key with - replaced by _}_adjustment` / `..._reset_button`.
 const SLIDER_KEYS: &[&str] = &[
-    "noise-gate-threshold",
-    "pedal-profile-input",
-    "pedal-profile-output",
-    "amp-profile-input",
-    "amp-profile-output",
-    "ir-level",
+    "gate-threshold",
     "eq-hp",
     "eq-low",
     "eq-mid",
     "eq-high",
     "eq-lp",
+    "pedal-input",
+    "pedal-output",
+    "amp-input",
+    "amp-output",
+    "ir-level",
 ];
 
 /// ExpanderRows collapsed on launch when "collapse-on-launch" is enabled.
-const EXPANDER_ROW_IDS: &[&str] = &[
-    "noise_gate_row",
-    "eq_row",
-    "pedal_profile_row",
-    "amp_profile_row",
-    "ir_row",
-];
+const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "ir_row"];
 
 fn main() {
     env_logger::init();
@@ -105,7 +99,7 @@ fn build_ui(app: &adw::Application) {
         setup_file_picker_row(&builder, &win, &settings, spec);
     }
 
-    bind_toggle(&builder, &settings, "noise_gate_row", "noise-gate-enabled");
+    bind_toggle(&builder, &settings, "gate_row", "gate-enabled");
     bind_toggle(&builder, &settings, "eq_row", "eq-enabled");
 
     for key in SLIDER_KEYS {
@@ -121,14 +115,14 @@ fn build_ui(app: &adw::Application) {
         input_device: path_from_settings(&settings, "input-device"),
         output_device: path_from_settings(&settings, "output-device"),
         buffer_size: settings.int("buffer-size") as u32,
-        gate_enabled: settings.boolean("noise-gate-enabled"),
-        gate_threshold_db: settings.double("noise-gate-threshold") as f32,
-        pedal_profile_path: path_from_settings(&settings, "pedal-profile-path"),
-        pedal_in_gain_db: settings.double("pedal-profile-input") as f32,
-        pedal_out_gain_db: settings.double("pedal-profile-output") as f32,
-        amp_profile_path: path_from_settings(&settings, "amp-profile-path"),
-        amp_in_gain_db: settings.double("amp-profile-input") as f32,
-        amp_out_gain_db: settings.double("amp-profile-output") as f32,
+        gate_enabled: settings.boolean("gate-enabled"),
+        gate_threshold_db: settings.double("gate-threshold") as f32,
+        pedal_profile_path: path_from_settings(&settings, "pedal-path"),
+        pedal_in_gain_db: settings.double("pedal-input") as f32,
+        pedal_out_gain_db: settings.double("pedal-output") as f32,
+        amp_profile_path: path_from_settings(&settings, "amp-path"),
+        amp_in_gain_db: settings.double("amp-input") as f32,
+        amp_out_gain_db: settings.double("amp-output") as f32,
         ir_path: path_from_settings(&settings, "ir-path"),
         ir_level_db: settings.double("ir-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
@@ -173,13 +167,13 @@ fn build_ui(app: &adw::Application) {
             wire_toggle_button(&builder, "mute_button", "mute", Arc::clone(&engine.mute));
             wire_toggle_button(
                 &builder,
-                "pedal_profile_bypass_button",
+                "pedal_bypass_button",
                 "pedal",
                 Arc::clone(&engine.pedal_bypass),
             );
             wire_toggle_button(
                 &builder,
-                "amp_profile_bypass_button",
+                "amp_bypass_button",
                 "amp",
                 Arc::clone(&engine.amp_bypass),
             );
@@ -220,17 +214,17 @@ fn build_ui(app: &adw::Application) {
 
             wire_normalize_button(
                 &builder,
-                "pedal_profile_output_normalize_button",
+                "pedal_output_normalize_button",
                 Arc::clone(&engine.pedal_loudness),
                 settings.clone(),
-                "pedal-profile-output",
+                "pedal-output",
             );
             wire_normalize_button(
                 &builder,
-                "amp_profile_output_normalize_button",
+                "amp_output_normalize_button",
                 Arc::clone(&engine.amp_loudness),
                 settings.clone(),
-                "amp-profile-output",
+                "amp-output",
             );
 
             settings.connect_changed(None, move |s, key| match key {
@@ -252,14 +246,14 @@ fn build_ui(app: &adw::Application) {
                         },
                     );
                 }
-                "noise-gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
-                "noise-gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
-                "pedal-profile-path" => engine.load_pedal_profile(path_from_settings(s, key)),
-                "pedal-profile-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
-                "pedal-profile-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
-                "amp-profile-path" => engine.load_amp_profile(path_from_settings(s, key)),
-                "amp-profile-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
-                "amp-profile-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
+                "gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
+                "gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
+                "pedal-path" => engine.load_pedal_profile(path_from_settings(s, key)),
+                "pedal-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
+                "pedal-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
+                "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
+                "amp-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
+                "amp-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
                 "ir-path" => engine.load_ir(path_from_settings(s, key)),
                 "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
                 "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),

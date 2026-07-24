@@ -52,8 +52,8 @@ impl Preset {
     pub fn from_settings(settings: &gio::Settings) -> Self {
         Preset {
             gate: PresetGate {
-                enabled: settings.boolean("noise-gate-enabled"),
-                threshold: round1(settings.double("noise-gate-threshold")),
+                enabled: settings.boolean("gate-enabled"),
+                threshold: round1(settings.double("gate-threshold")),
             },
             eq: PresetEq {
                 enabled: settings.boolean("eq-enabled"),
@@ -65,14 +65,14 @@ impl Preset {
                 lp: settings.double("eq-lp").round() as u32,
             },
             pedal: PresetProfile {
-                file: settings.string("pedal-profile-path").to_string(),
-                input: round1(settings.double("pedal-profile-input")),
-                output: round1(settings.double("pedal-profile-output")),
+                file: settings.string("pedal-path").to_string(),
+                input: round1(settings.double("pedal-input")),
+                output: round1(settings.double("pedal-output")),
             },
             amp: PresetProfile {
-                file: settings.string("amp-profile-path").to_string(),
-                input: round1(settings.double("amp-profile-input")),
-                output: round1(settings.double("amp-profile-output")),
+                file: settings.string("amp-path").to_string(),
+                input: round1(settings.double("amp-input")),
+                output: round1(settings.double("amp-output")),
             },
             ir: PresetIr {
                 file: settings.string("ir-path").to_string(),
@@ -82,8 +82,8 @@ impl Preset {
     }
 
     pub fn apply(&self, settings: &gio::Settings) {
-        let _ = settings.set_boolean("noise-gate-enabled", self.gate.enabled);
-        let _ = settings.set_double("noise-gate-threshold", self.gate.threshold);
+        let _ = settings.set_boolean("gate-enabled", self.gate.enabled);
+        let _ = settings.set_double("gate-threshold", self.gate.threshold);
         let _ = settings.set_boolean("eq-enabled", self.eq.enabled);
         let _ = settings.set_string(
             "eq-position",
@@ -94,12 +94,12 @@ impl Preset {
         let _ = settings.set_double("eq-mid", self.eq.mid);
         let _ = settings.set_double("eq-high", self.eq.high);
         let _ = settings.set_double("eq-lp", self.eq.lp as f64);
-        let _ = settings.set_string("pedal-profile-path", &self.pedal.file);
-        let _ = settings.set_double("pedal-profile-input", self.pedal.input);
-        let _ = settings.set_double("pedal-profile-output", self.pedal.output);
-        let _ = settings.set_string("amp-profile-path", &self.amp.file);
-        let _ = settings.set_double("amp-profile-input", self.amp.input);
-        let _ = settings.set_double("amp-profile-output", self.amp.output);
+        let _ = settings.set_string("pedal-path", &self.pedal.file);
+        let _ = settings.set_double("pedal-input", self.pedal.input);
+        let _ = settings.set_double("pedal-output", self.pedal.output);
+        let _ = settings.set_string("amp-path", &self.amp.file);
+        let _ = settings.set_double("amp-input", self.amp.input);
+        let _ = settings.set_double("amp-output", self.amp.output);
         let _ = settings.set_string("ir-path", &self.ir.file);
         let _ = settings.set_double("ir-level", self.ir.level);
     }

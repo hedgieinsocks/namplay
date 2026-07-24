@@ -1,7 +1,7 @@
 using Gtk 4.0;
 using Adw 1;
 
-Gtk.Adjustment noise_gate_threshold_adjustment {
+Gtk.Adjustment gate_threshold_adjustment {
   lower: -80;
   upper: -20;
   value: -60;
@@ -9,7 +9,7 @@ Gtk.Adjustment noise_gate_threshold_adjustment {
   page-increment: 1;
 }
 
-Gtk.Adjustment pedal_profile_input_adjustment {
+Gtk.Adjustment pedal_input_adjustment {
   lower: -20;
   upper: 20;
   value: 0;
@@ -17,7 +17,7 @@ Gtk.Adjustment pedal_profile_input_adjustment {
   page-increment: 1;
 }
 
-Gtk.Adjustment pedal_profile_output_adjustment {
+Gtk.Adjustment pedal_output_adjustment {
   lower: -20;
   upper: 20;
   value: 0;
@@ -25,7 +25,7 @@ Gtk.Adjustment pedal_profile_output_adjustment {
   page-increment: 1;
 }
 
-Gtk.Adjustment amp_profile_input_adjustment {
+Gtk.Adjustment amp_input_adjustment {
   lower: -20;
   upper: 20;
   value: 0;
@@ -33,7 +33,7 @@ Gtk.Adjustment amp_profile_input_adjustment {
   page-increment: 1;
 }
 
-Gtk.Adjustment amp_profile_output_adjustment {
+Gtk.Adjustment amp_output_adjustment {
   lower: -20;
   upper: 20;
   value: 0;
@@ -290,21 +290,21 @@ Adw.ApplicationWindow window {
 
       content: Adw.PreferencesPage {
         Adw.PreferencesGroup {
-          Adw.ExpanderRow noise_gate_row {
+          Adw.ExpanderRow gate_row {
             title: "Noise Gate";
             subtitle: "Suppress the signal below a threshold";
             show-enable-switch: true;
             enable-expansion: false;
 
-            Adw.ActionRow noise_gate_threshold_row {
+            Adw.ActionRow gate_threshold_row {
               title: "Threshold";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale noise_gate_threshold_scale {
+              Gtk.Scale gate_threshold_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: noise_gate_threshold_adjustment;
+                adjustment: gate_threshold_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -323,12 +323,12 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: noise_gate_threshold_adjustment;
+                  adjustment: gate_threshold_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.Button noise_gate_threshold_reset_button {
+                Gtk.Button gate_threshold_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }
@@ -550,13 +550,13 @@ Adw.ApplicationWindow window {
             }
           }
 
-          Adw.ExpanderRow pedal_profile_row {
+          Adw.ExpanderRow pedal_row {
             title: "Pedal Profile";
             subtitle: "No file selected";
             enable-expansion: false;
 
             [suffix]
-            Gtk.Button pedal_profile_clear_button {
+            Gtk.Button pedal_clear_button {
               valign: center;
               icon-name: "edit-clear-symbolic";
               tooltip-text: "Clear selected file";
@@ -567,7 +567,7 @@ Adw.ApplicationWindow window {
             }
 
             [suffix]
-            Gtk.Button pedal_profile_button {
+            Gtk.Button pedal_button {
               valign: center;
               icon-name: "document-open-symbolic";
               tooltip-text: "Choose pedal profile file";
@@ -577,15 +577,15 @@ Adw.ApplicationWindow window {
               ]
             }
 
-            Adw.ActionRow pedal_profile_input_row {
+            Adw.ActionRow pedal_input_row {
               title: "Input";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale pedal_profile_input_scale {
+              Gtk.Scale pedal_input_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: pedal_profile_input_adjustment;
+                adjustment: pedal_input_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -604,32 +604,32 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: pedal_profile_input_adjustment;
+                  adjustment: pedal_input_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.ToggleButton pedal_profile_bypass_button {
+                Gtk.ToggleButton pedal_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
                   tooltip-text: "Bypass";
                 }
 
-                Gtk.Button pedal_profile_input_reset_button {
+                Gtk.Button pedal_input_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }
               }
             }
 
-            Adw.ActionRow pedal_profile_output_row {
+            Adw.ActionRow pedal_output_row {
               title: "Output";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale pedal_profile_output_scale {
+              Gtk.Scale pedal_output_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: pedal_profile_output_adjustment;
+                adjustment: pedal_output_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -648,17 +648,17 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: pedal_profile_output_adjustment;
+                  adjustment: pedal_output_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.Button pedal_profile_output_normalize_button {
+                Gtk.Button pedal_output_normalize_button {
                   icon-name: "view-restore-symbolic";
                   tooltip-text: "Normalize";
                 }
 
-                Gtk.Button pedal_profile_output_reset_button {
+                Gtk.Button pedal_output_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }
@@ -666,13 +666,13 @@ Adw.ApplicationWindow window {
             }
           }
 
-          Adw.ExpanderRow amp_profile_row {
+          Adw.ExpanderRow amp_row {
             title: "Amp Profile";
             subtitle: "No file selected";
             enable-expansion: false;
 
             [suffix]
-            Gtk.Button amp_profile_clear_button {
+            Gtk.Button amp_clear_button {
               valign: center;
               icon-name: "edit-clear-symbolic";
               tooltip-text: "Clear selected file";
@@ -683,7 +683,7 @@ Adw.ApplicationWindow window {
             }
 
             [suffix]
-            Gtk.Button amp_profile_button {
+            Gtk.Button amp_button {
               valign: center;
               icon-name: "document-open-symbolic";
               tooltip-text: "Choose amp profile file";
@@ -693,15 +693,15 @@ Adw.ApplicationWindow window {
               ]
             }
 
-            Adw.ActionRow amp_profile_input_row {
+            Adw.ActionRow amp_input_row {
               title: "Input";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale amp_profile_input_scale {
+              Gtk.Scale amp_input_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: amp_profile_input_adjustment;
+                adjustment: amp_input_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -720,32 +720,32 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: amp_profile_input_adjustment;
+                  adjustment: amp_input_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.ToggleButton amp_profile_bypass_button {
+                Gtk.ToggleButton amp_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
                   tooltip-text: "Bypass";
                 }
 
-                Gtk.Button amp_profile_input_reset_button {
+                Gtk.Button amp_input_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }
               }
             }
 
-            Adw.ActionRow amp_profile_output_row {
+            Adw.ActionRow amp_output_row {
               title: "Output";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale amp_profile_output_scale {
+              Gtk.Scale amp_output_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: amp_profile_output_adjustment;
+                adjustment: amp_output_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -764,17 +764,17 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: amp_profile_output_adjustment;
+                  adjustment: amp_output_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.Button amp_profile_output_normalize_button {
+                Gtk.Button amp_output_normalize_button {
                   icon-name: "view-restore-symbolic";
                   tooltip-text: "Normalize";
                 }
 
-                Gtk.Button amp_profile_output_reset_button {
+                Gtk.Button amp_output_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }

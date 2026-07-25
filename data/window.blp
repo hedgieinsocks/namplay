@@ -41,7 +41,7 @@ Gtk.Adjustment amp_output_adjustment {
   page-increment: 1;
 }
 
-Gtk.Adjustment ir_level_adjustment {
+Gtk.Adjustment cab_level_adjustment {
   lower: -40;
   upper: 0;
   value: -18;
@@ -84,7 +84,7 @@ Gtk.Adjustment eq_hp_adjustment {
 Gtk.Adjustment eq_lp_adjustment {
   lower: 5000;
   upper: 16000;
-  value: 7000;
+  value: 8000;
   step-increment: 50;
   page-increment: 500;
 }
@@ -291,7 +291,7 @@ Adw.ApplicationWindow window {
       content: Adw.PreferencesPage {
         Adw.PreferencesGroup {
           Adw.ExpanderRow gate_row {
-            title: "Noise Gate";
+            title: "Gate";
             subtitle: "Suppress the signal below a threshold";
             show-enable-switch: true;
             enable-expansion: false;
@@ -338,7 +338,7 @@ Adw.ApplicationWindow window {
 
           Adw.ExpanderRow eq_row {
             title: "Equalizer";
-            subtitle: "3-band equalizer with high/low pass";
+            subtitle: "3-band EQ with high/low pass";
             show-enable-switch: true;
             enable-expansion: false;
 
@@ -349,7 +349,7 @@ Adw.ApplicationWindow window {
               Gtk.DropDown eq_position_dropdown {
                 valign: center;
                 model: Gtk.StringList {
-                  strings ["Pre Pedal", "Pre Amp", "Post IR"]
+                  strings ["Pre Pedal", "Pre Amp", "Post Cab"]
                 };
               }
             }
@@ -551,7 +551,7 @@ Adw.ApplicationWindow window {
           }
 
           Adw.ExpanderRow pedal_row {
-            title: "Pedal Profile";
+            title: "Pedal";
             subtitle: "No file selected";
             enable-expansion: false;
 
@@ -667,7 +667,7 @@ Adw.ApplicationWindow window {
           }
 
           Adw.ExpanderRow amp_row {
-            title: "Amp Profile";
+            title: "Amp";
             subtitle: "No file selected";
             enable-expansion: false;
 
@@ -782,13 +782,13 @@ Adw.ApplicationWindow window {
             }
           }
 
-          Adw.ExpanderRow ir_row {
-            title: "Impulse Response";
+          Adw.ExpanderRow cab_row {
+            title: "Cab";
             subtitle: "No file selected";
             enable-expansion: false;
 
             [suffix]
-            Gtk.Button ir_clear_button {
+            Gtk.Button cab_clear_button {
               valign: center;
               icon-name: "edit-clear-symbolic";
               tooltip-text: "Clear selected file";
@@ -799,7 +799,7 @@ Adw.ApplicationWindow window {
             }
 
             [suffix]
-            Gtk.Button ir_button {
+            Gtk.Button cab_button {
               valign: center;
               icon-name: "document-open-symbolic";
               tooltip-text: "Choose impulse response file";
@@ -809,15 +809,15 @@ Adw.ApplicationWindow window {
               ]
             }
 
-            Adw.ActionRow ir_level_row {
+            Adw.ActionRow cab_level_row {
               title: "Level";
               subtitle: "dB";
 
               [suffix]
-              Gtk.Scale ir_level_scale {
+              Gtk.Scale cab_level_scale {
                 orientation: horizontal;
                 width-request: 250;
-                adjustment: ir_level_adjustment;
+                adjustment: cab_level_adjustment;
                 round-digits: 1;
                 valign: center;
                 margin-start: 12;
@@ -836,17 +836,17 @@ Adw.ApplicationWindow window {
                 Gtk.SpinButton {
                   numeric: true;
                   digits: 1;
-                  adjustment: ir_level_adjustment;
+                  adjustment: cab_level_adjustment;
                   width-chars: 6;
                   xalign: 1.0;
                 }
 
-                Gtk.ToggleButton ir_bypass_button {
+                Gtk.ToggleButton cab_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
                   tooltip-text: "Bypass";
                 }
 
-                Gtk.Button ir_level_reset_button {
+                Gtk.Button cab_level_reset_button {
                   icon-name: "edit-undo-symbolic";
                   tooltip-text: "Reset to default";
                 }

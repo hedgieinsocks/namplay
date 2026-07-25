@@ -20,14 +20,14 @@ const EQ_MID_Q_BOOST: f32 = 0.7;
 pub enum EqPosition {
     PrePedal = 0,
     PreAmp = 1,
-    PostIr = 2,
+    PostCab = 2,
 }
 
 impl EqPosition {
     pub fn from_index(index: u32) -> Self {
         match index {
             0 => Self::PrePedal,
-            2 => Self::PostIr,
+            2 => Self::PostCab,
             _ => Self::PreAmp,
         }
     }
@@ -35,7 +35,7 @@ impl EqPosition {
     pub fn from_setting(setting: &str) -> Self {
         match setting {
             "pre-pedal" => Self::PrePedal,
-            "post-ir" => Self::PostIr,
+            "post-cab" => Self::PostCab,
             _ => Self::PreAmp,
         }
     }
@@ -48,7 +48,7 @@ impl EqPosition {
         match self {
             Self::PrePedal => "pre-pedal",
             Self::PreAmp => "pre-amp",
-            Self::PostIr => "post-ir",
+            Self::PostCab => "post-cab",
         }
     }
 }
@@ -67,7 +67,7 @@ impl AtomicF32 {
     }
 }
 
-pub(super) struct NoiseGate {
+pub(super) struct Gate {
     open_threshold: f32,
     close_threshold: f32,
     attack_coeff: f32,
@@ -80,10 +80,10 @@ pub(super) struct NoiseGate {
     last_threshold_db: f32,
 }
 
-impl NoiseGate {
+impl Gate {
     pub(super) fn new(threshold_db: f32, sample_rate: u32) -> Self {
         let sr = sample_rate as f32;
-        NoiseGate {
+        Gate {
             open_threshold: db_to_gain(threshold_db),
             close_threshold: db_to_gain(threshold_db - 6.0),
             attack_coeff: (-1.0_f32 / (0.001 * sr)).exp(),

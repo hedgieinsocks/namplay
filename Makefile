@@ -2,8 +2,8 @@ BIN    := namplay
 APP_ID := io.github.hedgieinsocks.Namplay
 PREFIX ?= $(HOME)/.local
 
-ICON_SRC    := data/$(APP_ID).png
-ICON_DST    := $(PREFIX)/share/icons/hicolor/128x128/apps/$(APP_ID).png
+ICON_SRC    := data/$(APP_ID).svg
+ICON_DST    := $(PREFIX)/share/icons/hicolor/128x128/apps/$(APP_ID).svg
 DESKTOP_SRC := data/$(APP_ID).desktop
 DESKTOP_DST := $(PREFIX)/share/applications/$(APP_ID).desktop
 SCHEMA_SRC  := data/$(APP_ID).gschema.xml

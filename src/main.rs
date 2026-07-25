@@ -45,9 +45,9 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
         filter_suffix: "nam",
     },
     FilePickerSpec {
-        prefix: "ir",
-        key: "ir-path",
-        title: "Choose Impulse Response",
+        prefix: "cab",
+        key: "cab-path",
+        title: "Choose Cabinet IR",
         filter_name: "WAV Files",
         filter_suffix: "wav",
     },
@@ -66,11 +66,11 @@ const SLIDER_KEYS: &[&str] = &[
     "pedal-output",
     "amp-input",
     "amp-output",
-    "ir-level",
+    "cab-level",
 ];
 
 /// ExpanderRows collapsed on launch when "collapse-on-launch" is enabled.
-const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "ir_row"];
+const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "cab_row"];
 
 fn main() {
     env_logger::init();
@@ -123,8 +123,8 @@ fn build_ui(app: &adw::Application) {
         amp_profile_path: path_from_settings(&settings, "amp-path"),
         amp_in_gain_db: settings.double("amp-input") as f32,
         amp_out_gain_db: settings.double("amp-output") as f32,
-        ir_path: path_from_settings(&settings, "ir-path"),
-        ir_level_db: settings.double("ir-level") as f32,
+        cab_path: path_from_settings(&settings, "cab-path"),
+        cab_level_db: settings.double("cab-level") as f32,
         eq_enabled: settings.boolean("eq-enabled"),
         eq_pos: EqPosition::from_setting(settings.string("eq-position").as_str()),
         eq_low_db: settings.double("eq-low") as f32,
@@ -179,9 +179,9 @@ fn build_ui(app: &adw::Application) {
             );
             wire_toggle_button(
                 &builder,
-                "ir_bypass_button",
-                "ir",
-                Arc::clone(&engine.ir_bypass),
+                "cab_bypass_button",
+                "cab",
+                Arc::clone(&engine.cab_bypass),
             );
 
             let tuner_hz_rx = engine
@@ -254,8 +254,8 @@ fn build_ui(app: &adw::Application) {
                 "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
                 "amp-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
                 "amp-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
-                "ir-path" => engine.load_ir(path_from_settings(s, key)),
-                "ir-level" => engine.set_ir_level_db(s.double(key) as f32),
+                "cab-path" => engine.load_cab(path_from_settings(s, key)),
+                "cab-level" => engine.set_cab_level_db(s.double(key) as f32),
                 "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
                 "eq-position" => {
                     engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))

@@ -15,6 +15,7 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/namplay/cargo
+    RUSTFLAGS: "-C target-cpu=x86-64-v3"
 modules:
   - name: blueprint-compiler
     buildsystem: meson
@@ -31,7 +32,7 @@ modules:
       - cargo build --release
       - install -Dm755 target/release/namplay /app/bin/namplay
       - install -Dm644 data/io.github.hedgieinsocks.Namplay.desktop /app/share/applications/io.github.hedgieinsocks.Namplay.desktop
-      - install -Dm644 data/io.github.hedgieinsocks.Namplay.png /app/share/icons/hicolor/128x128/apps/io.github.hedgieinsocks.Namplay.png
+      - install -Dm644 data/io.github.hedgieinsocks.Namplay.svg /app/share/icons/hicolor/128x128/apps/io.github.hedgieinsocks.Namplay.svg
       - install -Dm644 data/io.github.hedgieinsocks.Namplay.gschema.xml /app/share/glib-2.0/schemas/io.github.hedgieinsocks.Namplay.gschema.xml
       - glib-compile-schemas /app/share/glib-2.0/schemas
     sources:

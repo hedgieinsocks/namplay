@@ -1,6 +1,6 @@
 //! Real-time JACK process callback running the mono signal chain
-//! gate -> EQ (pre-pedal) -> pedal -> EQ (pre-amp) -> amp -> IR -> EQ (post-IR),
-//! fanning out to stereo at the IR stage when the IR file has two channels.
+//! gate -> (eq) -> pedal -> (eq) -> amp -> cab -> (eq),
+//! fanning out to stereo at the Cab stage when the Cab file has two channels.
 
 use std::collections::VecDeque;
 use std::sync::{
@@ -12,15 +12,15 @@ use fft_convolver::FFTConvolver;
 use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
 use nam_rs::Model;
 
-use super::dsp::{AtomicF32, EqChannel, EqCoeffs, NoiseGate};
-use super::ir::IrConvolvers;
+use super::cab::CabConvolvers;
+use super::dsp::{AtomicF32, EqChannel, EqCoeffs, Gate};
 use super::EqPosition;
 
 pub(super) struct NamProcessor {
     pub(super) mute: Arc<AtomicBool>,
     pub(super) gate_enabled: Arc<AtomicBool>,
     pub(super) gate_threshold_db: Arc<AtomicF32>,
-    pub(super) gate: NoiseGate,
+    pub(super) gate: Gate,
     pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_pedal_profile: Option<Model>,
     pub(super) pedal_bypass: Arc<AtomicBool>,
@@ -31,11 +31,11 @@ pub(super) struct NamProcessor {
     pub(super) amp_bypass: Arc<AtomicBool>,
     pub(super) amp_in_gain: Arc<AtomicF32>,
     pub(super) amp_out_gain: Arc<AtomicF32>,
-    pub(super) ir_rx: mpsc::Receiver<Option<IrConvolvers>>,
-    pub(super) current_ir_l: Option<FFTConvolver<f32>>,
-    pub(super) current_ir_r: Option<FFTConvolver<f32>>,
-    pub(super) ir_bypass: Arc<AtomicBool>,
-    pub(super) ir_level: Arc<AtomicF32>,
+    pub(super) cab_rx: mpsc::Receiver<Option<CabConvolvers>>,
+    pub(super) current_cab_l: Option<FFTConvolver<f32>>,
+    pub(super) current_cab_r: Option<FFTConvolver<f32>>,
+    pub(super) cab_bypass: Arc<AtomicBool>,
+    pub(super) cab_level: Arc<AtomicF32>,
     pub(super) eq_enabled: Arc<AtomicBool>,
     pub(super) eq_pos: Arc<AtomicU32>,
     pub(super) eq_low_db: Arc<AtomicF32>,
@@ -68,15 +68,15 @@ impl ProcessHandler for NamProcessor {
         while let Ok(new_profile) = self.amp_profile_rx.try_recv() {
             self.current_amp_profile = new_profile;
         }
-        while let Ok(new_ir) = self.ir_rx.try_recv() {
-            match new_ir {
+        while let Ok(new_cab) = self.cab_rx.try_recv() {
+            match new_cab {
                 Some((l, r)) => {
-                    self.current_ir_l = Some(l);
-                    self.current_ir_r = r;
+                    self.current_cab_l = Some(l);
+                    self.current_cab_r = r;
                 }
                 None => {
-                    self.current_ir_l = None;
-                    self.current_ir_r = None;
+                    self.current_cab_l = None;
+                    self.current_cab_r = None;
                 }
             }
         }
@@ -134,8 +134,8 @@ impl ProcessHandler for NamProcessor {
         let amp_bypass = self.amp_bypass.load(Ordering::Relaxed);
         let amp_in_gain = self.amp_in_gain.get();
         let amp_out_gain = self.amp_out_gain.get();
-        let ir_bypass = self.ir_bypass.load(Ordering::Relaxed);
-        let ir_level = self.ir_level.get();
+        let cab_bypass = self.cab_bypass.load(Ordering::Relaxed);
+        let cab_level = self.cab_level.get();
 
         let input = self.in_port.as_slice(ps);
         let out_l = self.out_port_1.as_mut_slice(ps);
@@ -174,29 +174,29 @@ impl ProcessHandler for NamProcessor {
         }
 
         let n = out_l.len().min(self.conv_buf.len());
-        let mut stereo_ir = false;
+        let mut stereo_cab = false;
 
-        if !ir_bypass {
-            if let Some(ir_l) = &mut self.current_ir_l {
+        if !cab_bypass {
+            if let Some(cab_l) = &mut self.current_cab_l {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
-                let _ = ir_l.process(&self.conv_buf[..n], &mut out_l[..n]);
-                apply_gain(&mut out_l[..n], ir_level);
-                if let Some(ir_r) = &mut self.current_ir_r {
-                    let _ = ir_r.process(&self.conv_buf[..n], &mut out_r[..n]);
-                    apply_gain(&mut out_r[..n], ir_level);
-                    stereo_ir = true;
+                let _ = cab_l.process(&self.conv_buf[..n], &mut out_l[..n]);
+                apply_gain(&mut out_l[..n], cab_level);
+                if let Some(cab_r) = &mut self.current_cab_r {
+                    let _ = cab_r.process(&self.conv_buf[..n], &mut out_r[..n]);
+                    apply_gain(&mut out_r[..n], cab_level);
+                    stereo_cab = true;
                 }
             }
         }
 
-        if eq_enabled && eq_pos == EqPosition::PostIr {
+        if eq_enabled && eq_pos == EqPosition::PostCab {
             self.eq_l.process_buffer(out_l, &self.eq_coeffs);
-            if stereo_ir {
+            if stereo_cab {
                 self.eq_r.process_buffer(out_r, &self.eq_coeffs);
             }
         }
 
-        if !stereo_ir {
+        if !stereo_cab {
             out_r.copy_from_slice(out_l);
         }
 

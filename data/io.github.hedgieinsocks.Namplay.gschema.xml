@@ -72,11 +72,11 @@
       <summary>Amp profile output gain in dB</summary>
     </key>
 
-    <key name="ir-path" type="s">
+    <key name="cab-path" type="s">
       <default>''</default>
       <summary>Path to the selected impulse response file</summary>
     </key>
-    <key name="ir-level" type="d">
+    <key name="cab-level" type="d">
       <range min="-40" max="0"/>
       <default>-18</default>
       <summary>Impulse response output level in dB</summary>
@@ -90,7 +90,7 @@
       <choices>
         <choice value="pre-pedal"/>
         <choice value="pre-amp"/>
-        <choice value="post-ir"/>
+        <choice value="post-cab"/>
       </choices>
       <default>'pre-amp'</default>
       <summary>EQ position in the signal chain</summary>
@@ -117,7 +117,7 @@
     </key>
     <key name="eq-lp" type="d">
       <range min="5000" max="16000"/>
-      <default>7000</default>
+      <default>8000</default>
       <summary>EQ low-pass filter cutoff in Hz</summary>
     </key>
   </schema>

@@ -30,7 +30,7 @@ pub struct PresetProfile {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PresetIr {
+pub struct PresetCab {
     pub file: String,
     pub level: f64,
 }
@@ -41,7 +41,7 @@ pub struct Preset {
     pub eq: PresetEq,
     pub pedal: PresetProfile,
     pub amp: PresetProfile,
-    pub ir: PresetIr,
+    pub cab: PresetCab,
 }
 
 fn round1(v: f64) -> f64 {
@@ -74,9 +74,9 @@ impl Preset {
                 input: round1(settings.double("amp-input")),
                 output: round1(settings.double("amp-output")),
             },
-            ir: PresetIr {
-                file: settings.string("ir-path").to_string(),
-                level: round1(settings.double("ir-level")),
+            cab: PresetCab {
+                file: settings.string("cab-path").to_string(),
+                level: round1(settings.double("cab-level")),
             },
         }
     }
@@ -100,7 +100,7 @@ impl Preset {
         let _ = settings.set_string("amp-path", &self.amp.file);
         let _ = settings.set_double("amp-input", self.amp.input);
         let _ = settings.set_double("amp-output", self.amp.output);
-        let _ = settings.set_string("ir-path", &self.ir.file);
-        let _ = settings.set_double("ir-level", self.ir.level);
+        let _ = settings.set_string("cab-path", &self.cab.file);
+        let _ = settings.set_double("cab-level", self.cab.level);
     }
 }

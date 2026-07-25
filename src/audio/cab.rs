@@ -4,15 +4,15 @@ use fft_convolver::FFTConvolver;
 use futures_channel::mpsc::UnboundedSender;
 use log::warn;
 
-/// Left convolver, plus a right one when the IR file is stereo.
-pub(super) type IrConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
+/// Left convolver, plus a right one when the Cab file is stereo.
+pub(super) type CabConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
 
 pub(super) fn load(
     path: &str,
     sample_rate: u32,
     block_size: usize,
     warning_tx: &UnboundedSender<String>,
-) -> Option<IrConvolvers> {
+) -> Option<CabConvolvers> {
     let (left, right) = load_wav_channels(path, sample_rate, warning_tx)?;
     let mut conv_l = FFTConvolver::<f32>::default();
     conv_l.init(block_size, &left).ok()?;
@@ -35,8 +35,8 @@ fn load_wav_channels(
             "file sample rate {}Hz != JACK sample rate {}Hz",
             spec.sample_rate, jack_sample_rate
         );
-        warn!(target: "ir", "{detail}");
-        let _ = warning_tx.unbounded_send(format!("IR: {detail}"));
+        warn!(target: "cab", "{detail}");
+        let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
     }
     let channels = spec.channels as usize;
     let samples: Vec<f32> = match spec.sample_format {

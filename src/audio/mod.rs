@@ -1,9 +1,9 @@
 //! JACK audio engine: owns the client and hands parameter changes to the
 //! real-time processor via atomics and channels.
 
+mod cab;
 mod devices;
 mod dsp;
-mod ir;
 mod processor;
 mod profile;
 mod tuner;
@@ -22,10 +22,10 @@ use nam_rs::Model;
 
 const MAX_BLOCK_SIZE: usize = 8192;
 
+use cab::CabConvolvers;
 pub(crate) use dsp::AtomicF32;
 pub use dsp::EqPosition;
-use dsp::{db_to_gain, EqChannel, EqCoeffs, NoiseGate};
-use ir::IrConvolvers;
+use dsp::{db_to_gain, EqChannel, EqCoeffs, Gate};
 use processor::NamProcessor;
 
 struct Notifications;
@@ -51,8 +51,8 @@ pub struct InitialParams {
     pub amp_profile_path: Option<String>,
     pub amp_in_gain_db: f32,
     pub amp_out_gain_db: f32,
-    pub ir_path: Option<String>,
-    pub ir_level_db: f32,
+    pub cab_path: Option<String>,
+    pub cab_level_db: f32,
     pub eq_enabled: bool,
     pub eq_pos: EqPosition,
     pub eq_low_db: f32,
@@ -76,9 +76,9 @@ pub struct AudioEngine {
     pub amp_bypass: Arc<AtomicBool>,
     amp_in_gain: Arc<AtomicF32>,
     amp_out_gain: Arc<AtomicF32>,
-    ir_tx: mpsc::Sender<Option<IrConvolvers>>,
-    pub ir_bypass: Arc<AtomicBool>,
-    ir_level: Arc<AtomicF32>,
+    cab_tx: mpsc::Sender<Option<CabConvolvers>>,
+    pub cab_bypass: Arc<AtomicBool>,
+    cab_level: Arc<AtomicF32>,
     eq_enabled: Arc<AtomicBool>,
     eq_pos: Arc<AtomicU32>,
     eq_low_db: Arc<AtomicF32>,
@@ -130,8 +130,8 @@ impl AudioEngine {
         let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
         let amp_loudness = Arc::new(Mutex::new(None::<f32>));
         let amp_bypass = Arc::new(AtomicBool::new(false));
-        let ir_bypass = Arc::new(AtomicBool::new(false));
-        let (ir_tx, ir_rx) = mpsc::channel::<Option<IrConvolvers>>();
+        let cab_bypass = Arc::new(AtomicBool::new(false));
+        let (cab_tx, cab_rx) = mpsc::channel::<Option<CabConvolvers>>();
 
         let mute = Arc::new(AtomicBool::new(false));
         let gate_enabled = Arc::new(AtomicBool::new(params.gate_enabled));
@@ -140,7 +140,7 @@ impl AudioEngine {
         let pedal_out_gain = Arc::new(AtomicF32::new(db_to_gain(params.pedal_out_gain_db)));
         let amp_in_gain = Arc::new(AtomicF32::new(db_to_gain(params.amp_in_gain_db)));
         let amp_out_gain = Arc::new(AtomicF32::new(db_to_gain(params.amp_out_gain_db)));
-        let ir_level = Arc::new(AtomicF32::new(db_to_gain(params.ir_level_db)));
+        let cab_level = Arc::new(AtomicF32::new(db_to_gain(params.cab_level_db)));
         let eq_enabled = Arc::new(AtomicBool::new(params.eq_enabled));
         let eq_pos = Arc::new(AtomicU32::new(params.eq_pos.index()));
         let eq_low_db = Arc::new(AtomicF32::new(params.eq_low_db));
@@ -165,7 +165,7 @@ impl AudioEngine {
             "in={}dB out={}dB",
             params.amp_in_gain_db, params.amp_out_gain_db
         );
-        debug!(target: "ir", "level={}dB", params.ir_level_db);
+        debug!(target: "cab", "level={}dB", params.cab_level_db);
         debug!(
             target: "eq",
             "state={} position={} low={}dB mid={}dB high={}dB hp={}Hz lp={}Hz",
@@ -203,7 +203,7 @@ impl AudioEngine {
             mute: Arc::clone(&mute),
             gate_enabled: Arc::clone(&gate_enabled),
             gate_threshold_db: Arc::clone(&gate_threshold_db),
-            gate: NoiseGate::new(params.gate_threshold_db, sample_rate),
+            gate: Gate::new(params.gate_threshold_db, sample_rate),
             pedal_profile_rx,
             current_pedal_profile: None,
             pedal_bypass: Arc::clone(&pedal_bypass),
@@ -214,11 +214,11 @@ impl AudioEngine {
             amp_bypass: Arc::clone(&amp_bypass),
             amp_in_gain: Arc::clone(&amp_in_gain),
             amp_out_gain: Arc::clone(&amp_out_gain),
-            ir_rx,
-            current_ir_l: None,
-            current_ir_r: None,
-            ir_bypass: Arc::clone(&ir_bypass),
-            ir_level: Arc::clone(&ir_level),
+            cab_rx,
+            current_cab_l: None,
+            current_cab_r: None,
+            cab_bypass: Arc::clone(&cab_bypass),
+            cab_level: Arc::clone(&cab_level),
             eq_enabled: Arc::clone(&eq_enabled),
             eq_pos: Arc::clone(&eq_pos),
             eq_low_db: Arc::clone(&eq_low_db),
@@ -255,9 +255,9 @@ impl AudioEngine {
             amp_bypass,
             amp_in_gain,
             amp_out_gain,
-            ir_tx,
-            ir_bypass,
-            ir_level,
+            cab_tx,
+            cab_bypass,
+            cab_level,
             eq_enabled,
             eq_pos,
             eq_low_db,
@@ -277,7 +277,7 @@ impl AudioEngine {
 
         engine.load_pedal_profile(params.pedal_profile_path);
         engine.load_amp_profile(params.amp_profile_path);
-        engine.load_ir(params.ir_path);
+        engine.load_cab(params.cab_path);
         engine.set_input_device(params.input_device);
         engine.set_output_device(params.output_device);
 
@@ -430,26 +430,26 @@ impl AudioEngine {
         self.amp_out_gain.set(db_to_gain(db));
     }
 
-    pub fn load_ir(&self, path: Option<String>) {
-        let tx = self.ir_tx.clone();
+    pub fn load_cab(&self, path: Option<String>) {
+        let tx = self.cab_tx.clone();
         let sample_rate = self.sample_rate;
         let block_size = self.block_size;
         let warning_tx = self.warning_tx.clone();
         std::thread::spawn(move || {
             let convolvers = match path {
                 None => {
-                    debug!(target: "ir", "file cleared");
+                    debug!(target: "cab", "file cleared");
                     None
                 }
                 Some(p) => {
-                    debug!(target: "ir", "loading file: {p}");
-                    let result = ir::load(&p, sample_rate, block_size, &warning_tx);
+                    debug!(target: "cab", "loading file: {p}");
+                    let result = cab::load(&p, sample_rate, block_size, &warning_tx);
                     if result.is_some() {
-                        debug!(target: "ir", "file loaded: {p}");
+                        debug!(target: "cab", "file loaded: {p}");
                     } else {
                         let detail = format!("failed to load file: {p}");
-                        error!(target: "ir", "{detail}");
-                        let _ = warning_tx.unbounded_send(format!("IR: {detail}"));
+                        error!(target: "cab", "{detail}");
+                        let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
                     }
                     result
                 }
@@ -458,9 +458,9 @@ impl AudioEngine {
         });
     }
 
-    pub fn set_ir_level_db(&self, db: f32) {
-        debug!(target: "ir", "level={db}dB");
-        self.ir_level.set(db_to_gain(db));
+    pub fn set_cab_level_db(&self, db: f32) {
+        debug!(target: "cab", "level={db}dB");
+        self.cab_level.set(db_to_gain(db));
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {

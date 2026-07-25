@@ -1,4 +1,4 @@
-<img src="data/io.github.hedgieinsocks.Namplay.png" width="128" height="128">
+<img src="data/io.github.hedgieinsocks.Namplay.svg">
 
 # Namplay
 
@@ -12,10 +12,10 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * 3-band EQ with High/Low Pass
 * Pedal NAM Profile
 * Amp/Rig NAM Profile
-* Impulse Response
+* Impulse Response Cab
 * Presets
 * Tuner
-* Input & output selector
+* Input & Output selector
 
 ## 🎯 Goals
 
@@ -37,7 +37,7 @@ So if we get polished enough, eventually we can become discoverable!
 
 ## 🗃️ Dependencies
 
-Namplay relies on JACK implementation based on PipeWire.
+Namplay is built for `x86-64-v3` CPUs and relies on JACK implementation based on PipeWire.
 
 ```sh
 # Fedora
@@ -51,13 +51,13 @@ sudo pacman -S pipewire-jack
 ## 📥 Installation
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.5.3/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.5.4/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 
 ## 🔧 Configuration
 
-Namplay does not feature a resampler (yet) so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for IRs and .nam profiles. As for the buffer size, it can be adjusted from Namplay's Audio Settings.
+Namplay does not feature a resampler (yet) so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for Cabs and .nam profiles. As for the buffer size, it can be adjusted from Namplay's Audio Settings.
 
 ```sh
 cat ~/.config/pipewire/jack.conf.d/jack.conf

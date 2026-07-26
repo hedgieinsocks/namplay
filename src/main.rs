@@ -1,6 +1,3 @@
-//! Application entry point: builds the window and wires GSettings changes
-//! to the audio engine.
-
 mod audio;
 mod preset;
 mod ui;
@@ -28,7 +25,6 @@ const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
 const TARGET_LOUDNESS_LUFS: f64 = -18.0;
 
-/// File-backed rows; widget ids are derived from `prefix` (see `FilePickerSpec`).
 const FILE_PICKERS: &[FilePickerSpec] = &[
     FilePickerSpec {
         prefix: "pedal",
@@ -53,24 +49,37 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
     },
 ];
 
-/// Settings keys of the sliders; the matching adjustment and reset button ids
-/// are `{key with - replaced by _}_adjustment` / `..._reset_button`.
-const SLIDER_KEYS: &[&str] = &[
-    "gate-threshold",
-    "eq-hp",
-    "eq-low",
-    "eq-mid",
-    "eq-high",
-    "eq-lp",
-    "pedal-input",
-    "pedal-output",
-    "amp-input",
-    "amp-output",
-    "cab-level",
-];
-
-/// ExpanderRows collapsed on launch when "collapse-on-launch" is enabled.
 const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "cab_row"];
+
+macro_rules! slider_settings {
+    ($($key:literal => $setter:ident),+ $(,)?) => {
+        const SLIDER_KEYS: &[&str] = &[$($key),+];
+
+        fn dispatch_slider_change(engine: &AudioEngine, s: &gio::Settings, key: &str) -> bool {
+            match key {
+                $($key => {
+                    engine.$setter(s.double(key) as f32);
+                    true
+                })+
+                _ => false,
+            }
+        }
+    };
+}
+
+slider_settings! {
+    "gate-threshold" => set_gate_threshold_db,
+    "eq-hp" => set_eq_hp_freq,
+    "eq-low" => set_eq_low_db,
+    "eq-mid" => set_eq_mid_db,
+    "eq-high" => set_eq_high_db,
+    "eq-lp" => set_eq_lp_freq,
+    "pedal-input" => set_pedal_in_gain_db,
+    "pedal-output" => set_pedal_out_gain_db,
+    "amp-input" => set_amp_in_gain_db,
+    "amp-output" => set_amp_out_gain_db,
+    "cab-level" => set_cab_level_db,
+}
 
 fn main() {
     env_logger::init();
@@ -227,45 +236,39 @@ fn build_ui(app: &adw::Application) {
                 "amp-output",
             );
 
-            settings.connect_changed(None, move |s, key| match key {
-                "input-device" => engine.set_input_device(path_from_settings(s, key)),
-                "output-device" => engine.set_output_device(path_from_settings(s, key)),
-                "buffer-size" => {
-                    engine.set_buffer_size(s.int(key) as u32);
-                    // PipeWire applies the new buffer size to the graph asynchronously,
-                    // so jack_get_buffer_size() briefly still reports the old value.
-                    let latency_label = latency_label.clone();
-                    let engine = Rc::clone(&engine);
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(100),
-                        move || {
-                            latency_label.set_text(&format_latency(
-                                engine.buffer_size(),
-                                engine.sample_rate(),
-                            ));
-                        },
-                    );
+            settings.connect_changed(None, move |s, key| {
+                if dispatch_slider_change(&engine, s, key) {
+                    return;
                 }
-                "gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
-                "gate-threshold" => engine.set_gate_threshold_db(s.double(key) as f32),
-                "pedal-path" => engine.load_pedal_profile(path_from_settings(s, key)),
-                "pedal-input" => engine.set_pedal_in_gain_db(s.double(key) as f32),
-                "pedal-output" => engine.set_pedal_out_gain_db(s.double(key) as f32),
-                "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
-                "amp-input" => engine.set_amp_in_gain_db(s.double(key) as f32),
-                "amp-output" => engine.set_amp_out_gain_db(s.double(key) as f32),
-                "cab-path" => engine.load_cab(path_from_settings(s, key)),
-                "cab-level" => engine.set_cab_level_db(s.double(key) as f32),
-                "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
-                "eq-position" => {
-                    engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
+                match key {
+                    "input-device" => engine.set_input_device(path_from_settings(s, key)),
+                    "output-device" => engine.set_output_device(path_from_settings(s, key)),
+                    "buffer-size" => {
+                        engine.set_buffer_size(s.int(key) as u32);
+                        // PipeWire applies the new buffer size to the graph asynchronously,
+                        // so jack_get_buffer_size() briefly still reports the old value.
+                        let latency_label = latency_label.clone();
+                        let engine = Rc::clone(&engine);
+                        glib::timeout_add_local_once(
+                            std::time::Duration::from_millis(100),
+                            move || {
+                                latency_label.set_text(&format_latency(
+                                    engine.buffer_size(),
+                                    engine.sample_rate(),
+                                ));
+                            },
+                        );
+                    }
+                    "gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
+                    "pedal-path" => engine.load_pedal_profile(path_from_settings(s, key)),
+                    "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
+                    "cab-path" => engine.load_cab(path_from_settings(s, key)),
+                    "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
+                    "eq-position" => {
+                        engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
+                    }
+                    _ => {}
                 }
-                "eq-low" => engine.set_eq_low_db(s.double(key) as f32),
-                "eq-mid" => engine.set_eq_mid_db(s.double(key) as f32),
-                "eq-high" => engine.set_eq_high_db(s.double(key) as f32),
-                "eq-hp" => engine.set_eq_hp_freq(s.double(key) as f32),
-                "eq-lp" => engine.set_eq_lp_freq(s.double(key) as f32),
-                _ => {}
             });
         }
         Err(e) => {

@@ -1,5 +1,3 @@
-//! YAML preset files: serialization to and from GSettings.
-
 use gio::prelude::*;
 use serde::{Deserialize, Serialize};
 

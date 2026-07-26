@@ -1,10 +1,7 @@
-//! Impulse response loading: WAV decode and FFT convolver setup.
-
 use fft_convolver::FFTConvolver;
 use futures_channel::mpsc::UnboundedSender;
 use log::warn;
 
-/// Left convolver, plus a right one when the Cab file is stereo.
 pub(super) type CabConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
 
 pub(super) fn load(
@@ -53,8 +50,8 @@ fn load_wav_channels(
     if channels == 1 {
         Some((samples, None))
     } else {
-        let left: Vec<f32> = samples.chunks(channels).map(|c| c[0]).collect();
-        let right: Vec<f32> = samples.chunks(channels).map(|c| c[1]).collect();
+        let (left, right): (Vec<f32>, Vec<f32>) =
+            samples.chunks(channels).map(|c| (c[0], c[1])).unzip();
         Some((left, Some(right)))
     }
 }

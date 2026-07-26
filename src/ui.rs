@@ -1,6 +1,3 @@
-//! Widget setup helpers: window state, file picker rows, slider and toggle
-//! bindings, EQ position dropdown, preset save/load actions.
-
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -13,7 +10,7 @@ use log::{debug, error};
 use crate::audio::{AudioEngine, EqPosition};
 use crate::preset::Preset;
 
-const BUFFER_SIZES: &[u32] = &[32, 64, 128, 256, 512, 1024];
+const BUFFER_SIZES: &[u32] = &[64, 128, 192, 256];
 
 pub fn show_persistent_toast(toast_overlay: &adw::ToastOverlay, msg: &str) {
     let toast = adw::Toast::new(msg);
@@ -46,8 +43,6 @@ pub fn path_from_settings(settings: &gio::Settings, key: &str) -> Option<String>
     }
 }
 
-/// A file-backed ExpanderRow whose widget ids follow the
-/// `{prefix}_row` / `{prefix}_button` / `{prefix}_clear_button` convention.
 pub struct FilePickerSpec {
     pub prefix: &'static str,
     pub key: &'static str,
@@ -278,7 +273,6 @@ fn setup_device_dropdown(
     });
 }
 
-/// Index 0 is the NONE_LABEL sentinel; device list positions are offset by 1.
 fn selected_index(current: &str, devices: &[String]) -> u32 {
     if current.is_empty() {
         0

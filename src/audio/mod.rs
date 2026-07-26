@@ -1,12 +1,11 @@
-//! JACK audio engine: owns the client and hands parameter changes to the
-//! real-time processor via atomics and channels.
-
 mod cab;
-mod devices;
-mod dsp;
+mod device;
+mod eq;
+mod gate;
+mod nam;
 mod processor;
-mod profile;
 mod tuner;
+mod util;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -23,16 +22,16 @@ use nam_rs::Model;
 const MAX_BLOCK_SIZE: usize = 8192;
 
 use cab::CabConvolvers;
-pub(crate) use dsp::AtomicF32;
-pub use dsp::EqPosition;
-use dsp::{db_to_gain, EqChannel, EqCoeffs, Gate};
+pub use eq::EqPosition;
+use eq::{EqChannel, EqCoeffs};
+use gate::Gate;
 use processor::NamProcessor;
+use util::db_to_gain;
+pub(crate) use util::AtomicF32;
 
 struct Notifications;
 
 impl jack::NotificationHandler for Notifications {
-    // Runs on JACK's notification thread, not the RT process thread, so logging
-    // here is fine.
     fn xrun(&mut self, _: &Client) -> jack::Control {
         warn!(target: "jack", "xrun (buffer under/overrun)");
         jack::Control::Continue
@@ -302,11 +301,11 @@ impl AudioEngine {
     }
 
     pub fn input_devices(&self) -> Vec<String> {
-        devices::audio_devices(self._client.as_client(), PortFlags::IS_OUTPUT)
+        device::audio_devices(self._client.as_client(), PortFlags::IS_OUTPUT)
     }
 
     pub fn output_devices(&self) -> Vec<String> {
-        devices::audio_devices(self._client.as_client(), PortFlags::IS_INPUT)
+        device::audio_devices(self._client.as_client(), PortFlags::IS_INPUT)
     }
 
     pub fn set_input_device(&self, device: Option<String>) {
@@ -321,7 +320,7 @@ impl AudioEngine {
             return;
         };
 
-        let sources = devices::matching_ports(client, &device, PortFlags::IS_OUTPUT);
+        let sources = device::matching_ports(client, &device, PortFlags::IS_OUTPUT);
 
         match sources.first() {
             Some(source) => {
@@ -355,7 +354,7 @@ impl AudioEngine {
             return;
         };
 
-        let destinations = devices::matching_ports(client, &device, PortFlags::IS_INPUT);
+        let destinations = device::matching_ports(client, &device, PortFlags::IS_INPUT);
 
         if destinations.is_empty() {
             let detail = format!("device not found: {device}");
@@ -389,7 +388,7 @@ impl AudioEngine {
     }
 
     pub fn load_pedal_profile(&self, path: Option<String>) {
-        profile::load(
+        nam::load(
             "Pedal",
             self.pedal_profile_tx.clone(),
             path,
@@ -410,7 +409,7 @@ impl AudioEngine {
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
-        profile::load(
+        nam::load(
             "Amp",
             self.amp_profile_tx.clone(),
             path,

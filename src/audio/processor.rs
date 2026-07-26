@@ -1,7 +1,3 @@
-//! Real-time JACK process callback running the mono signal chain
-//! gate -> (eq) -> pedal -> (eq) -> amp -> cab -> (eq),
-//! fanning out to stereo at the Cab stage when the Cab file has two channels.
-
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
@@ -13,7 +9,9 @@ use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
 use nam_rs::Model;
 
 use super::cab::CabConvolvers;
-use super::dsp::{AtomicF32, EqChannel, EqCoeffs, Gate};
+use super::util::AtomicF32;
+use super::eq::{EqChannel, EqCoeffs};
+use super::gate::Gate;
 use super::EqPosition;
 
 pub(super) struct NamProcessor {

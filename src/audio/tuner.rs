@@ -1,6 +1,3 @@
-//! Pitch detection thread: feeds audio samples from the real-time callback
-//! through the McLeod detector and pushes the result to whoever is listening.
-
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},

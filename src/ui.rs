@@ -302,9 +302,9 @@ pub fn setup_preset_actions(
             let yaml = match serde_yaml::to_string(&preset) {
                 Ok(y) => y,
                 Err(e) => {
-                    let detail = format!("failed to serialize data: {e}");
-                    error!(target: "preset", "{detail}");
-                    show_persistent_toast(&toast_overlay_save, &format!("Preset: {detail}"));
+                    let msg = format!("failed to serialize data: {e}");
+                    error!(target: "preset", "{msg}");
+                    show_persistent_toast(&toast_overlay_save, &format!("Preset: {msg}"));
                     return;
                 }
             };
@@ -320,9 +320,9 @@ pub fn setup_preset_actions(
                     if let Some(path) = file.path() {
                         debug!(target: "preset", "saving file: {}", path.display());
                         if let Err(e) = std::fs::write(&path, yaml.as_bytes()) {
-                            let detail = format!("failed to save file: {e}");
-                            error!(target: "preset", "{detail}");
-                            show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
+                            let msg = format!("failed to save file: {e}");
+                            error!(target: "preset", "{msg}");
+                            show_persistent_toast(&toast_overlay, &format!("Preset: {msg}"));
                         } else {
                             debug!(target: "preset", "file saved: {}", path.display());
                         }
@@ -360,18 +360,18 @@ pub fn setup_preset_actions(
                         let content = match std::fs::read_to_string(&path) {
                             Ok(c) => c,
                             Err(e) => {
-                                let detail = format!("failed to load file: {e}");
-                                error!(target: "preset", "{detail}");
-                                show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
+                                let msg = format!("failed to load file: {e}");
+                                error!(target: "preset", "{msg}");
+                                show_persistent_toast(&toast_overlay, &format!("Preset: {msg}"));
                                 return;
                             }
                         };
                         let preset = match serde_yaml::from_str::<Preset>(&content) {
                             Ok(p) => p,
                             Err(e) => {
-                                let detail = format!("invalid format: {e}");
-                                error!(target: "preset", "{detail}");
-                                show_persistent_toast(&toast_overlay, &format!("Preset: {detail}"));
+                                let msg = format!("invalid format: {e}");
+                                error!(target: "preset", "{msg}");
+                                show_persistent_toast(&toast_overlay, &format!("Preset: {msg}"));
                                 return;
                             }
                         };

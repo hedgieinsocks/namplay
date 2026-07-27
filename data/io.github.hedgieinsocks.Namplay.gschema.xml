@@ -17,6 +17,10 @@
       <default>true</default>
       <summary>Collapse all expandable rows on launch</summary>
     </key>
+    <key name="run-in-background" type="b">
+      <default>false</default>
+      <summary>Keep processing audio after the window is closed</summary>
+    </key>
 
     <key name="input-device" type="s">
       <default>''</default>

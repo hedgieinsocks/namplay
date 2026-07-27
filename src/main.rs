@@ -2,6 +2,7 @@ mod audio;
 mod preset;
 mod ui;
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -85,12 +86,31 @@ fn main() {
     env_logger::init();
     let app = adw::Application::builder().application_id(APP_ID).build();
 
-    app.connect_activate(build_ui);
+    app.add_main_option(
+        "background",
+        glib::Char(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start without showing the main window",
+        None,
+    );
+
+    let start_hidden = Rc::new(Cell::new(false));
+
+    app.connect_handle_local_options({
+        let start_hidden = Rc::clone(&start_hidden);
+        move |_app, options| {
+            start_hidden.set(options.contains("background"));
+            std::ops::ControlFlow::Continue(())
+        }
+    });
+
+    app.connect_activate(move |app| build_ui(app, start_hidden.get()));
 
     std::process::exit(app.run().into());
 }
 
-fn build_ui(app: &adw::Application) {
+fn build_ui(app: &adw::Application, start_hidden: bool) {
     if let Some(win) = app.active_window() {
         win.present();
         return;
@@ -120,6 +140,8 @@ fn build_ui(app: &adw::Application) {
     setup_eq_position(&builder, &settings);
     setup_buffer_size_dropdown(&builder, &settings);
 
+    let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
+
     match AudioEngine::new(InitialParams {
         input_device: path_from_settings(&settings, "input-device"),
         output_device: path_from_settings(&settings, "output-device"),
@@ -143,8 +165,6 @@ fn build_ui(app: &adw::Application) {
         eq_lp_freq: settings.double("eq-lp") as f32,
     }) {
         Ok(engine) => {
-            let toast_overlay: adw::ToastOverlay =
-                builder.object("toast_overlay").expect("toast_overlay");
             let warning_rx = engine
                 .warning_rx
                 .borrow_mut()
@@ -274,8 +294,6 @@ fn build_ui(app: &adw::Application) {
         Err(e) => {
             let msg = format!("Audio unavailable: {e}");
             error!(target: "audio", "{msg}");
-            let toast_overlay: adw::ToastOverlay =
-                builder.object("toast_overlay").expect("toast_overlay");
             show_persistent_toast(&toast_overlay, &msg);
         }
     }
@@ -283,10 +301,15 @@ fn build_ui(app: &adw::Application) {
     let settings_clone = settings.clone();
     win.connect_close_request(move |w| {
         save_window_state(w, &settings_clone);
+        if settings_clone.boolean("run-in-background") {
+            w.set_visible(false);
+            return glib::Propagation::Stop;
+        }
         glib::Propagation::Proceed
     });
 
     app.add_action(&settings.create_action("collapse-on-launch"));
+    app.add_action(&settings.create_action("run-in-background"));
 
     if settings.boolean("collapse-on-launch") {
         for id in EXPANDER_ROW_IDS {
@@ -294,6 +317,18 @@ fn build_ui(app: &adw::Application) {
             row.set_expanded(false);
         }
     }
+
+    if settings.boolean("run-in-background") {
+        request_background_permission(toast_overlay.clone());
+    }
+    settings.connect_changed(Some("run-in-background"), {
+        let toast_overlay = toast_overlay.clone();
+        move |s, key| {
+            if s.boolean(key) {
+                request_background_permission(toast_overlay.clone());
+            }
+        }
+    });
 
     let audio_window: adw::Window = builder.object("audio_window").expect("audio_window");
     let audio_action = gio::ActionEntry::builder("audio-settings")
@@ -344,7 +379,42 @@ fn build_ui(app: &adw::Application) {
 
     setup_preset_actions(&builder, &win, &settings, app);
 
-    win.present();
+    if start_hidden {
+        win.set_visible(false);
+    } else {
+        win.present();
+    }
+}
+
+fn request_background_permission(toast_overlay: adw::ToastOverlay) {
+    glib::MainContext::default().spawn_local(async move {
+        use ashpd::desktop::background::Background;
+        let result = async {
+            Background::request()
+                .reason("Namplay keeps processing audio while the window is closed")
+                .auto_start(false)
+                .dbus_activatable(false)
+                .send()
+                .await?
+                .response()
+        }
+        .await;
+        match result {
+            Ok(response) if response.run_in_background() => {
+                debug!(target: "background", "portal granted");
+            }
+            Ok(_) => {
+                let msg = "permission denied";
+                error!(target: "background", "{msg}");
+                show_persistent_toast(&toast_overlay, &format!("Background: {msg}"));
+            }
+            Err(e) => {
+                let msg = format!("portal request failed: {e}");
+                error!(target: "background", "{msg}");
+                show_persistent_toast(&toast_overlay, &format!("Background: {msg}"));
+            }
+        }
+    });
 }
 
 fn format_latency(buffer_size: u32, sample_rate: u32) -> String {

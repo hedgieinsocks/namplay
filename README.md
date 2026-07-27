@@ -16,6 +16,7 @@ GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson
 * Presets
 * Tuner
 * Input & Output selector
+* Headless mode
 
 ## 🎯 Goals
 

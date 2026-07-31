@@ -1,8 +1,9 @@
 mod audio;
 mod preset;
+mod tray;
 mod ui;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -22,7 +23,7 @@ use ui::{
     FilePickerSpec,
 };
 
-const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
+pub(crate) const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
 const TARGET_LOUDNESS_LUFS: f64 = -18.0;
 
@@ -213,6 +214,8 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 Arc::clone(&engine.cab_bypass),
             );
 
+            setup_tray(app, &win, &builder, &settings, &engine, start_hidden);
+
             let tuner_hz_rx = engine
                 .tuner_hz_rx
                 .borrow_mut()
@@ -292,9 +295,8 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
             });
         }
         Err(e) => {
-            let msg = format!("Audio unavailable: {e}");
-            error!(target: "audio", "{msg}");
-            show_persistent_toast(&toast_overlay, &msg);
+            error!(target: "audio", "Audio unavailable: {e}");
+            show_persistent_toast(&toast_overlay, "Audio unavailable");
         }
     }
 
@@ -409,9 +411,8 @@ fn request_background_permission(toast_overlay: adw::ToastOverlay) {
                 show_persistent_toast(&toast_overlay, &format!("Background: {msg}"));
             }
             Err(e) => {
-                let msg = format!("portal request failed: {e}");
-                error!(target: "background", "{msg}");
-                show_persistent_toast(&toast_overlay, &format!("Background: {msg}"));
+                error!(target: "background", "portal request failed: {e}");
+                show_persistent_toast(&toast_overlay, "Background: portal request failed");
             }
         }
     });
@@ -437,6 +438,101 @@ fn wire_toggle_button(
             "audio-volume-high-symbolic"
         });
         flag.store(active, Ordering::Relaxed);
+    });
+}
+
+fn setup_tray(
+    app: &adw::Application,
+    win: &adw::ApplicationWindow,
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    engine: &Rc<AudioEngine>,
+    start_hidden: bool,
+) {
+    let (cmd_tx, mut cmd_rx) = futures_channel::mpsc::unbounded();
+    let window_visible = Arc::new(AtomicBool::new(!start_hidden));
+
+    let tray_handle: Rc<RefCell<Option<ksni::blocking::Handle<tray::TrayState>>>> =
+        Rc::new(RefCell::new(None));
+
+    let refresh_tray = {
+        let tray_handle = Rc::clone(&tray_handle);
+        move || {
+            if let Some(h) = tray_handle.borrow().as_ref() {
+                let _ = h.update(|_| {});
+            }
+        }
+    };
+
+    win.connect_show({
+        let window_visible = Arc::clone(&window_visible);
+        let refresh_tray = refresh_tray.clone();
+        move |_| {
+            window_visible.store(true, Ordering::Relaxed);
+            refresh_tray();
+        }
+    });
+    win.connect_hide({
+        let window_visible = Arc::clone(&window_visible);
+        let refresh_tray = refresh_tray.clone();
+        move |_| {
+            window_visible.store(false, Ordering::Relaxed);
+            refresh_tray();
+        }
+    });
+
+    let set_enabled: Rc<dyn Fn(bool)> = Rc::new({
+        let tray_handle = Rc::clone(&tray_handle);
+        let mute = Arc::clone(&engine.mute);
+        let window_visible = Arc::clone(&window_visible);
+        let cmd_tx = cmd_tx.clone();
+        move |enabled: bool| {
+            let mut handle = tray_handle.borrow_mut();
+            if enabled {
+                if handle.is_none() {
+                    let state = tray::TrayState {
+                        window_visible: Arc::clone(&window_visible),
+                        mute: Arc::clone(&mute),
+                        cmd_tx: cmd_tx.clone(),
+                    };
+                    *handle = tray::spawn(state);
+                }
+            } else if let Some(h) = handle.take() {
+                h.shutdown().wait();
+            }
+        }
+    });
+
+    set_enabled(settings.boolean("tray-icon"));
+
+    app.add_action(&settings.create_action("tray-icon"));
+    settings.connect_changed(Some("tray-icon"), {
+        let set_enabled = Rc::clone(&set_enabled);
+        move |s, key| set_enabled(s.boolean(key))
+    });
+
+    let mute_button: gtk4::ToggleButton = builder.object("mute_button").expect("mute_button");
+    mute_button.connect_toggled(move |_| refresh_tray());
+
+    let win = win.clone();
+    let app = app.clone();
+    glib::MainContext::default().spawn_local(async move {
+        use futures_util::StreamExt;
+        while let Some(cmd) = cmd_rx.next().await {
+            match cmd {
+                tray::TrayCommand::ToggleWindow => {
+                    if win.is_visible() {
+                        win.set_visible(false);
+                    } else {
+                        win.present();
+                    }
+                }
+                tray::TrayCommand::ToggleMute => {
+                    mute_button.set_active(!mute_button.is_active());
+                }
+                tray::TrayCommand::Quit => app.quit(),
+            }
+        }
     });
 }
 

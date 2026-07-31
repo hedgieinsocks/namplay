@@ -103,9 +103,9 @@ impl AudioEngine {
 
         debug!(target: "jack", "buffer_size={}", params.buffer_size);
         if let Err(e) = client.set_buffer_size(params.buffer_size) {
-            let detail = format!("failed to set buffer size to {}: {e}", params.buffer_size);
-            warn!(target: "jack", "{detail}");
-            let _ = warning_tx.unbounded_send(format!("JACK: {detail}"));
+            let msg = format!("failed to set buffer size to {}", params.buffer_size);
+            warn!(target: "jack", "{msg}: {e}");
+            let _ = warning_tx.unbounded_send(format!("JACK: {msg}"));
         }
 
         let sample_rate = client.sample_rate();
@@ -291,9 +291,9 @@ impl AudioEngine {
     pub fn set_buffer_size(&self, frames: u32) {
         debug!(target: "jack", "buffer_size={frames}");
         if let Err(e) = self._client.as_client().set_buffer_size(frames) {
-            let detail = format!("failed to set buffer size to {frames}: {e}");
-            error!(target: "jack", "{detail}");
-            let _ = self.warning_tx.unbounded_send(format!("JACK: {detail}"));
+            let msg = format!("failed to set buffer size to {frames}");
+            error!(target: "jack", "{msg}: {e}");
+            let _ = self.warning_tx.unbounded_send(format!("JACK: {msg}"));
         }
     }
 
@@ -322,9 +322,9 @@ impl AudioEngine {
         match sources.first() {
             Some(source) => {
                 if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
-                    let detail = format!("failed to connect {source}: {e}");
-                    error!(target: "input", "{detail}");
-                    let _ = self.warning_tx.unbounded_send(format!("Input: {detail}"));
+                    let msg = format!("failed to connect {source}");
+                    error!(target: "input", "{msg}: {e}");
+                    let _ = self.warning_tx.unbounded_send(format!("Input: {msg}"));
                 } else {
                     debug!(target: "input", "device={device} port={source}");
                 }
@@ -365,9 +365,9 @@ impl AudioEngine {
             .zip(destinations.iter())
         {
             if let Err(e) = client.connect_ports_by_name(own_port, dest) {
-                let detail = format!("failed to connect {own_port} to {dest}: {e}");
-                error!(target: "output", "{detail}");
-                let _ = self.warning_tx.unbounded_send(format!("Output: {detail}"));
+                let msg = format!("failed to connect {own_port} to {dest}");
+                error!(target: "output", "{msg}: {e}");
+                let _ = self.warning_tx.unbounded_send(format!("Output: {msg}"));
             } else {
                 debug!(target: "output", "device={device} {own_port} -> {dest}");
             }

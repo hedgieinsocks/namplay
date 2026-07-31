@@ -1,6 +1,6 @@
 [package]
 name = "namplay"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 
 [[bin]]
@@ -25,6 +25,7 @@ pitch-detection = "0.3"
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "background"] }
+ksni = { version = "0.3", features = ["blocking"] }
 
 [profile.release]
 lto = true

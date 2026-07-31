@@ -9,9 +9,9 @@ use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
 use nam_rs::Model;
 
 use super::cab::CabConvolvers;
-use super::util::AtomicF32;
 use super::eq::{EqChannel, EqCoeffs};
 use super::gate::Gate;
+use super::util::AtomicF32;
 use super::EqPosition;
 
 pub(super) struct NamProcessor {

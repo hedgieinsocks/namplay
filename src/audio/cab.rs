@@ -1,10 +1,42 @@
+use std::sync::mpsc;
+
 use fft_convolver::FFTConvolver;
 use futures_channel::mpsc::UnboundedSender;
-use log::warn;
+use log::{debug, error, warn};
 
 pub(super) type CabConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
 
-pub(super) fn load(
+pub(super) fn spawn(
+    tx: mpsc::Sender<Option<CabConvolvers>>,
+    path: Option<String>,
+    sample_rate: u32,
+    block_size: usize,
+    warning_tx: UnboundedSender<String>,
+) {
+    std::thread::spawn(move || {
+        let convolvers = match path {
+            None => {
+                debug!(target: "cab", "file cleared");
+                None
+            }
+            Some(p) => {
+                debug!(target: "cab", "loading file: {p}");
+                let result = load(&p, sample_rate, block_size, &warning_tx);
+                if result.is_some() {
+                    debug!(target: "cab", "file loaded: {p}");
+                } else {
+                    let detail = format!("failed to load file: {p}");
+                    error!(target: "cab", "{detail}");
+                    let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
+                }
+                result
+            }
+        };
+        let _ = tx.send(convolvers);
+    });
+}
+
+fn load(
     path: &str,
     sample_rate: u32,
     block_size: usize,

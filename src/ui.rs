@@ -10,7 +10,7 @@ use log::{debug, error};
 use crate::audio::{AudioEngine, EqPosition};
 use crate::preset::Preset;
 
-const BUFFER_SIZES: &[u32] = &[64, 128, 192, 256];
+const BUFFER_SIZES: &[u32] = &[16, 32, 64, 128, 192, 256, 320, 384, 448, 512];
 
 pub fn show_persistent_toast(toast_overlay: &adw::ToastOverlay, msg: &str) {
     let toast = adw::Toast::new(msg);
@@ -166,6 +166,10 @@ pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Setti
     let dropdown: gtk4::DropDown = builder
         .object("buffer_size_dropdown")
         .expect("buffer_size_dropdown");
+
+    let labels: Vec<String> = BUFFER_SIZES.iter().map(|n| n.to_string()).collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+    dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
 
     let index_for = |frames: i32| {
         BUFFER_SIZES

@@ -87,7 +87,6 @@ pub struct AudioEngine {
     eq_lp_freq: Arc<AtomicF32>,
     _client: jack::AsyncClient<Notifications, NamProcessor>,
     sample_rate: u32,
-    block_size: usize,
     pub tuner_hz_rx: RefCell<Option<futures_channel::mpsc::UnboundedReceiver<f32>>>,
     pub tuner_enabled: Arc<AtomicBool>,
     tuner_shutdown: Arc<AtomicBool>,
@@ -110,7 +109,6 @@ impl AudioEngine {
         }
 
         let sample_rate = client.sample_rate();
-        let block_size = client.buffer_size() as usize;
         debug!(target: "jack", "state=connected sample_rate={sample_rate}Hz");
 
         let in_port = client
@@ -266,7 +264,6 @@ impl AudioEngine {
             eq_lp_freq,
             _client: active_client,
             sample_rate,
-            block_size,
             tuner_hz_rx: RefCell::new(Some(tuner_hz_rx)),
             tuner_enabled,
             tuner_shutdown,
@@ -430,31 +427,13 @@ impl AudioEngine {
     }
 
     pub fn load_cab(&self, path: Option<String>) {
-        let tx = self.cab_tx.clone();
-        let sample_rate = self.sample_rate;
-        let block_size = self.block_size;
-        let warning_tx = self.warning_tx.clone();
-        std::thread::spawn(move || {
-            let convolvers = match path {
-                None => {
-                    debug!(target: "cab", "file cleared");
-                    None
-                }
-                Some(p) => {
-                    debug!(target: "cab", "loading file: {p}");
-                    let result = cab::load(&p, sample_rate, block_size, &warning_tx);
-                    if result.is_some() {
-                        debug!(target: "cab", "file loaded: {p}");
-                    } else {
-                        let detail = format!("failed to load file: {p}");
-                        error!(target: "cab", "{detail}");
-                        let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
-                    }
-                    result
-                }
-            };
-            let _ = tx.send(convolvers);
-        });
+        cab::spawn(
+            self.cab_tx.clone(),
+            path,
+            self.sample_rate,
+            self.buffer_size() as usize,
+            self.warning_tx.clone(),
+        );
     }
 
     pub fn set_cab_level_db(&self, db: f32) {

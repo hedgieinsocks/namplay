@@ -89,10 +89,6 @@ Gtk.Adjustment eq_lp_adjustment {
   page-increment: 500;
 }
 
-Gtk.StringList buffer_size_model {
-  strings ["64", "128", "192", "256"]
-}
-
 menu primary_menu {
   item {
     label: "Collapse rows on launch";
@@ -203,7 +199,6 @@ Adw.Window audio_window {
           [suffix]
           Gtk.DropDown buffer_size_dropdown {
             valign: center;
-            model: buffer_size_model;
           }
         }
 

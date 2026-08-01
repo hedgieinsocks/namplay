@@ -1,16 +1,12 @@
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
 
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
 
-use crate::audio::{AudioEngine, EqPosition};
+use crate::audio::EqPosition;
 use crate::preset::Preset;
-
-const BUFFER_SIZES: &[u32] = &[16, 32, 64, 128, 192, 256, 320, 384, 448, 512];
 
 pub fn show_persistent_toast(toast_overlay: &adw::ToastOverlay, msg: &str) {
     let toast = adw::Toast::new(msg);
@@ -122,22 +118,31 @@ fn update_file_row(row: &adw::ExpanderRow, path: &str) {
     }
 }
 
-pub fn bind_adjustment(builder: &gtk4::Builder, settings: &gio::Settings, id: &str, key: &str) {
+pub fn bind_adjustment(
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    id: &str,
+    key: &'static str,
+) {
     let adj: gtk4::Adjustment = builder.object(id).expect(id);
     settings.bind(key, &adj, "value").build();
 }
 
-pub fn bind_toggle(builder: &gtk4::Builder, settings: &gio::Settings, id: &str, key: &str) {
+pub fn bind_toggle(builder: &gtk4::Builder, settings: &gio::Settings, id: &str, key: &'static str) {
     let row: adw::ExpanderRow = builder.object(id).expect(id);
     settings.bind(key, &row, "enable-expansion").build();
 }
 
-pub fn setup_reset_button(builder: &gtk4::Builder, settings: &gio::Settings, id: &str, key: &str) {
+pub fn setup_reset_button(
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    id: &str,
+    key: &'static str,
+) {
     let btn: gtk4::Button = builder.object(id).expect(id);
     let settings = settings.clone();
-    let key = key.to_owned();
     btn.connect_clicked(move |_| {
-        settings.reset(&key);
+        settings.reset(key);
     });
 }
 
@@ -160,133 +165,6 @@ pub fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
     settings.connect_changed(Some("eq-position"), move |s, key| {
         dropdown.set_selected(EqPosition::from_setting(s.string(key).as_str()).index());
     });
-}
-
-pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Settings) {
-    let dropdown: gtk4::DropDown = builder
-        .object("buffer_size_dropdown")
-        .expect("buffer_size_dropdown");
-
-    let labels: Vec<String> = BUFFER_SIZES.iter().map(|n| n.to_string()).collect();
-    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-    dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
-
-    let index_for = |frames: i32| {
-        BUFFER_SIZES
-            .iter()
-            .position(|&n| n as i32 == frames)
-            .unwrap_or_else(|| BUFFER_SIZES.iter().position(|&n| n == 256).unwrap_or(0))
-            as u32
-    };
-
-    dropdown.set_selected(index_for(settings.int("buffer-size")));
-
-    let settings_c = settings.clone();
-    dropdown.connect_selected_notify(move |dd| {
-        if let Some(&frames) = BUFFER_SIZES.get(dd.selected() as usize) {
-            let _ = settings_c.set_int("buffer-size", frames as i32);
-        }
-    });
-
-    settings.connect_changed(Some("buffer-size"), move |s, key| {
-        dropdown.set_selected(index_for(s.int(key)));
-    });
-}
-
-pub fn setup_device_rows(
-    builder: &gtk4::Builder,
-    settings: &gio::Settings,
-    engine: Rc<AudioEngine>,
-) {
-    setup_device_dropdown(
-        builder,
-        settings,
-        "input_device_dropdown",
-        "input_device_refresh_button",
-        "input-device",
-        Rc::clone(&engine),
-        AudioEngine::input_devices,
-    );
-    setup_device_dropdown(
-        builder,
-        settings,
-        "output_device_dropdown",
-        "output_device_refresh_button",
-        "output-device",
-        engine,
-        AudioEngine::output_devices,
-    );
-}
-
-fn setup_device_dropdown(
-    builder: &gtk4::Builder,
-    settings: &gio::Settings,
-    dropdown_id: &str,
-    refresh_button_id: &str,
-    key: &'static str,
-    engine: Rc<AudioEngine>,
-    list_devices: fn(&AudioEngine) -> Vec<String>,
-) {
-    let dropdown: gtk4::DropDown = builder.object(dropdown_id).expect(dropdown_id);
-    let refresh_button: gtk4::Button = builder.object(refresh_button_id).expect(refresh_button_id);
-
-    const NONE_LABEL: &str = "None";
-    let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-
-    let rebuild: Rc<dyn Fn(Vec<String>)> = Rc::new({
-        let dropdown = dropdown.clone();
-        let known = Rc::clone(&known);
-        let settings = settings.clone();
-        move |devices: Vec<String>| {
-            *known.borrow_mut() = devices.clone();
-
-            let current = settings.string(key).to_string();
-            let model = gtk4::StringList::new(&[NONE_LABEL]);
-            for device in &devices {
-                model.append(device);
-            }
-            dropdown.set_model(Some(&model));
-            dropdown.set_selected(selected_index(&current, &devices));
-        }
-    });
-
-    rebuild(list_devices(&engine));
-
-    let settings_c = settings.clone();
-    dropdown.connect_selected_notify(move |dd| {
-        let name = if dd.selected() == 0 {
-            String::new()
-        } else {
-            dd.selected_item()
-                .and_downcast::<gtk4::StringObject>()
-                .map(|s| s.string().to_string())
-                .unwrap_or_default()
-        };
-        let _ = settings_c.set_string(key, &name);
-    });
-
-    let dropdown_c = dropdown.clone();
-    let known_c = Rc::clone(&known);
-    settings.connect_changed(Some(key), move |s, k| {
-        let current = s.string(k).to_string();
-        dropdown_c.set_selected(selected_index(&current, &known_c.borrow()));
-    });
-
-    refresh_button.connect_clicked(move |_| {
-        rebuild(list_devices(&engine));
-    });
-}
-
-fn selected_index(current: &str, devices: &[String]) -> u32 {
-    if current.is_empty() {
-        0
-    } else {
-        devices
-            .iter()
-            .position(|d| d == current)
-            .map(|i| i as u32 + 1)
-            .unwrap_or(0)
-    }
 }
 
 pub fn setup_preset_actions(
@@ -387,72 +265,4 @@ pub fn setup_preset_actions(
         .build();
 
     app.add_action_entries([save_action, load_action]);
-}
-
-pub fn create_tuner_window(
-    builder: &gtk4::Builder,
-    mut tuner_hz_rx: futures_channel::mpsc::UnboundedReceiver<f32>,
-) -> adw::Window {
-    let window: adw::Window = builder.object("tuner_window").expect("tuner_window");
-    let note_label: gtk4::Label = builder
-        .object("tuner_note_label")
-        .expect("tuner_note_label");
-    let cents_label: gtk4::Label = builder
-        .object("tuner_cents_label")
-        .expect("tuner_cents_label");
-    let hz_label: gtk4::Label = builder.object("tuner_hz_label").expect("tuner_hz_label");
-
-    window.connect_hide({
-        let note_label = note_label.clone();
-        let cents_label = cents_label.clone();
-        let hz_label = hz_label.clone();
-        move |_| {
-            note_label.set_text("--");
-            cents_label.set_text("");
-            hz_label.set_text("");
-            note_label.remove_css_class("success");
-        }
-    });
-
-    glib::MainContext::default().spawn_local(async move {
-        use futures_util::StreamExt;
-        while let Some(hz) = tuner_hz_rx.next().await {
-            if let Some((name, cents)) = hz_to_note(hz) {
-                note_label.set_text(&name);
-                cents_label.set_text(&format!("{:+.0} cents", cents));
-                hz_label.set_text(&format!("{hz:.1} Hz"));
-                if cents.abs() <= 5.0 {
-                    note_label.add_css_class("success");
-                } else {
-                    note_label.remove_css_class("success");
-                }
-            } else {
-                note_label.set_text("--");
-                cents_label.set_text("");
-                hz_label.set_text("");
-                note_label.remove_css_class("success");
-            }
-        }
-    });
-
-    window
-}
-
-fn hz_to_note(hz: f32) -> Option<(String, f32)> {
-    if !(20.0..=8000.0).contains(&hz) {
-        return None;
-    }
-    let midi_float = 69.0 + 12.0 * (hz / 440.0).log2();
-    let midi_round = midi_float.round();
-    let cents = (midi_float - midi_round) * 100.0;
-    let midi_int = midi_round as i32;
-    if !(21..=108).contains(&midi_int) {
-        return None;
-    }
-    const NAMES: &[&str] = &[
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-    ];
-    let octave = (midi_int / 12) - 1;
-    let name = format!("{}{}", NAMES[(midi_int % 12) as usize], octave);
-    Some((name, cents))
 }

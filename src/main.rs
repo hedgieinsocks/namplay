@@ -2,6 +2,8 @@ mod audio;
 mod preset;
 mod tray;
 mod ui;
+mod ui_settings;
+mod ui_tuner;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -17,11 +19,12 @@ use log::{debug, error};
 
 use audio::{AudioEngine, EqPosition, InitialParams};
 use ui::{
-    bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
-    save_window_state, setup_buffer_size_dropdown, setup_device_rows, setup_eq_position,
-    setup_file_picker_row, setup_preset_actions, setup_reset_button, show_persistent_toast,
-    FilePickerSpec,
+    bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
+    setup_eq_position, setup_file_picker_row, setup_preset_actions, setup_reset_button,
+    show_persistent_toast, FilePickerSpec,
 };
+use ui_settings::{setup_audio_window, setup_buffer_size_dropdown};
+use ui_tuner::create_tuner_window;
 
 pub(crate) const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
@@ -182,17 +185,8 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 }
             });
 
-            let sample_rate_label: gtk4::Label = builder
-                .object("sample_rate_label")
-                .expect("sample_rate_label");
-            sample_rate_label.set_text(&engine.sample_rate().to_string());
-
-            let latency_label: gtk4::Label =
-                builder.object("latency_label").expect("latency_label");
-            latency_label.set_text(&format_latency(engine.buffer_size(), engine.sample_rate()));
-
             let engine = Rc::new(engine);
-            setup_device_rows(&builder, &settings, Rc::clone(&engine));
+            setup_audio_window(&builder, &settings, &engine);
 
             wire_toggle_button(&builder, "mute_button", "mute", Arc::clone(&engine.mute));
             wire_toggle_button(
@@ -266,22 +260,6 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 match key {
                     "input-device" => engine.set_input_device(path_from_settings(s, key)),
                     "output-device" => engine.set_output_device(path_from_settings(s, key)),
-                    "buffer-size" => {
-                        engine.set_buffer_size(s.int(key) as u32);
-                        // PipeWire applies the new buffer size to the graph asynchronously,
-                        // so jack_get_buffer_size() briefly still reports the old value.
-                        let latency_label = latency_label.clone();
-                        let engine = Rc::clone(&engine);
-                        glib::timeout_add_local_once(
-                            std::time::Duration::from_millis(100),
-                            move || {
-                                latency_label.set_text(&format_latency(
-                                    engine.buffer_size(),
-                                    engine.sample_rate(),
-                                ));
-                            },
-                        );
-                    }
                     "gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
                     "pedal-path" => engine.load_pedal_profile(path_from_settings(s, key)),
                     "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
@@ -416,10 +394,6 @@ fn request_background_permission(toast_overlay: adw::ToastOverlay) {
             }
         }
     });
-}
-
-fn format_latency(buffer_size: u32, sample_rate: u32) -> String {
-    format!("{:.1}", buffer_size as f64 / sample_rate as f64 * 1000.0)
 }
 
 fn wire_toggle_button(

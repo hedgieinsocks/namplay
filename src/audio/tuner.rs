@@ -70,3 +70,22 @@ pub(super) fn spawn(
         })
         .expect("tuner thread spawn failed");
 }
+
+pub(crate) fn hz_to_note(hz: f32) -> Option<(String, f32)> {
+    if !(20.0..=8000.0).contains(&hz) {
+        return None;
+    }
+    let midi_float = 69.0 + 12.0 * (hz / 440.0).log2();
+    let midi_round = midi_float.round();
+    let cents = (midi_float - midi_round) * 100.0;
+    let midi_int = midi_round as i32;
+    if !(21..=108).contains(&midi_int) {
+        return None;
+    }
+    const NAMES: &[&str] = &[
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let octave = (midi_int / 12) - 1;
+    let name = format!("{}{}", NAMES[(midi_int % 12) as usize], octave);
+    Some((name, cents))
+}

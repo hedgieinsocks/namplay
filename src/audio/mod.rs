@@ -26,6 +26,7 @@ pub use eq::EqPosition;
 use eq::{EqChannel, EqCoeffs};
 use gate::Gate;
 use processor::NamProcessor;
+pub(crate) use tuner::hz_to_note;
 use util::db_to_gain;
 pub(crate) use util::AtomicF32;
 

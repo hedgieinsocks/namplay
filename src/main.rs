@@ -327,16 +327,6 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         })
         .build();
 
-    let usage_action = gio::ActionEntry::builder("usage-guide")
-        .activate(|app: &adw::Application, _, _| {
-            gtk4::UriLauncher::new("https://github.com/hedgieinsocks/namplay#usage").launch(
-                app.active_window().as_ref(),
-                None::<&gio::Cancellable>,
-                |_| {},
-            );
-        })
-        .build();
-
     let about_action = gio::ActionEntry::builder("about")
         .activate(|app: &adw::Application, _, _| {
             let about = adw::AboutWindow::builder()
@@ -355,7 +345,7 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         })
         .build();
 
-    app.add_action_entries([audio_action, browse_action, usage_action, about_action]);
+    app.add_action_entries([audio_action, browse_action, about_action]);
 
     setup_preset_actions(&builder, &win, &settings, app);
 

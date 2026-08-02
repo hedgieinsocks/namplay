@@ -7,8 +7,8 @@ use std::sync::{
 use futures_channel::mpsc::UnboundedSender;
 use pitch_detection::detector::{mcleod::McLeodDetector, PitchDetector};
 
-const DETECTION_SIZE: usize = 2048;
-const DETECTION_PADDING: usize = 256;
+const DETECTION_SIZE: usize = 4096;
+const DETECTION_PADDING: usize = DETECTION_SIZE / 2;
 const POWER_THRESHOLD: f32 = 0.005;
 const CLARITY_THRESHOLD: f32 = 0.70;
 
@@ -27,7 +27,7 @@ pub(super) fn spawn(
             let mut detector = McLeodDetector::new(DETECTION_SIZE, DETECTION_PADDING);
             let mut was_enabled = false;
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(80));
+                std::thread::sleep(std::time::Duration::from_millis(100));
 
                 if shutdown.load(Ordering::Relaxed) {
                     break;

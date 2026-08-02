@@ -93,6 +93,8 @@ pub struct AudioEngine {
     tuner_shutdown: Arc<AtomicBool>,
     warning_tx: UnboundedSender<String>,
     pub warning_rx: RefCell<Option<UnboundedReceiver<String>>>,
+    profile_loaded_tx: UnboundedSender<&'static str>,
+    pub profile_loaded_rx: RefCell<Option<UnboundedReceiver<&'static str>>>,
 }
 
 impl AudioEngine {
@@ -101,6 +103,7 @@ impl AudioEngine {
             .map_err(|e| format!("JACK connection failed: {e}"))?;
 
         let (warning_tx, warning_rx) = futures_channel::mpsc::unbounded();
+        let (profile_loaded_tx, profile_loaded_rx) = futures_channel::mpsc::unbounded();
 
         debug!(target: "jack", "buffer_size={}", params.buffer_size);
         if let Err(e) = client.set_buffer_size(params.buffer_size) {
@@ -270,6 +273,8 @@ impl AudioEngine {
             tuner_shutdown,
             warning_tx,
             warning_rx: RefCell::new(Some(warning_rx)),
+            profile_loaded_tx,
+            profile_loaded_rx: RefCell::new(Some(profile_loaded_rx)),
         };
 
         engine.load_pedal_profile(params.pedal_profile_path);
@@ -393,6 +398,7 @@ impl AudioEngine {
             self.sample_rate,
             Arc::clone(&self.pedal_loudness),
             self.warning_tx.clone(),
+            self.profile_loaded_tx.clone(),
         );
     }
 
@@ -414,6 +420,7 @@ impl AudioEngine {
             self.sample_rate,
             Arc::clone(&self.amp_loudness),
             self.warning_tx.clone(),
+            self.profile_loaded_tx.clone(),
         );
     }
 

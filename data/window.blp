@@ -90,25 +90,34 @@ Gtk.Adjustment eq_lp_adjustment {
 }
 
 menu primary_menu {
-  item {
-    label: "Collapse rows on launch";
-    action: "app.collapse-on-launch";
-  }
+  section {
+    item {
+      label: "Collapse rows on launch";
+      action: "app.collapse-on-launch";
+    }
 
-  item {
-    label: "Run in background";
-    action: "app.run-in-background";
-  }
-
-  item {
-    label: "Show tray icon";
-    action: "app.tray-icon";
+    item {
+      label: "Normalize output";
+      action: "app.normalize-output";
+    }
   }
 
   section {
     item {
-      label: "Audio Settings";
-      action: "app.audio-settings";
+      label: "Run in background";
+      action: "app.run-in-background";
+    }
+
+    item {
+      label: "Show tray icon";
+      action: "app.tray-icon";
+    }
+  }
+
+  section {
+    item {
+      label: "Settings";
+      action: "app.settings";
     }
 
     item {
@@ -134,9 +143,7 @@ menu primary_menu {
       label: "Browse profiles";
       action: "app.browse-profiles";
     }
-  }
 
-  section {
     item {
       label: "About Namplay";
       action: "app.about";
@@ -567,6 +574,28 @@ Adw.ApplicationWindow window {
             }
 
             [suffix]
+            Gtk.Button pedal_next_button {
+              valign: center;
+              icon-name: "go-next-symbolic";
+              tooltip-text: "Load next file in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button pedal_prev_button {
+              valign: center;
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Load previous file in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
             Gtk.Button pedal_button {
               valign: center;
               icon-name: "document-open-symbolic";
@@ -683,6 +712,28 @@ Adw.ApplicationWindow window {
             }
 
             [suffix]
+            Gtk.Button amp_next_button {
+              valign: center;
+              icon-name: "go-next-symbolic";
+              tooltip-text: "Load next file in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button amp_prev_button {
+              valign: center;
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Load previous file in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
             Gtk.Button amp_button {
               valign: center;
               icon-name: "document-open-symbolic";
@@ -792,6 +843,28 @@ Adw.ApplicationWindow window {
               valign: center;
               icon-name: "edit-clear-symbolic";
               tooltip-text: "Clear selected file";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button cab_next_button {
+              valign: center;
+              icon-name: "go-next-symbolic";
+              tooltip-text: "Load next file in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button cab_prev_button {
+              valign: center;
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Load previous file in directory";
 
               styles [
                 "flat",

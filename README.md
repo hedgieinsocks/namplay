@@ -52,7 +52,7 @@ sudo pacman -S pipewire-jack
 ## 📥 Installation
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.6.4/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.7.0/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 

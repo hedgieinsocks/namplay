@@ -11,6 +11,7 @@ pub(super) fn load(
     sample_rate: u32,
     loudness_out: Arc<Mutex<Option<f32>>>,
     warning_tx: UnboundedSender<String>,
+    loaded_tx: UnboundedSender<&'static str>,
 ) {
     std::thread::spawn(move || {
         let target = label.to_lowercase();
@@ -31,7 +32,11 @@ pub(super) fn load(
                         warn!(target: &target, "{detail}");
                         let _ = warning_tx.unbounded_send(format!("{label}: {detail}"));
                     }
-                    *loudness_out.lock().unwrap() = nm.loudness();
+                    let loudness = nm.loudness();
+                    *loudness_out.lock().unwrap() = loudness;
+                    if loudness.is_some() {
+                        let _ = loaded_tx.unbounded_send(label);
+                    }
                     Model::from_nam(&nm).ok()
                 });
                 if model.is_some() {

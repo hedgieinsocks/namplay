@@ -1,6 +1,9 @@
-use std::path::Path;
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use gio::prelude::*;
+use glib::markup_escape_text;
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
@@ -47,6 +50,58 @@ pub struct FilePickerSpec {
     pub filter_suffix: &'static str,
 }
 
+fn list_sibling_files(path: &str, suffix: &str) -> Vec<PathBuf> {
+    let dir = match Path::new(path).parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case(suffix))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+fn sibling_path(current: &str, suffix: &str, offset: isize) -> Option<String> {
+    let files = list_sibling_files(current, suffix);
+    let index = files.iter().position(|p| p == Path::new(current))?;
+    let new_index = index as isize + offset;
+    if new_index < 0 || new_index as usize >= files.len() {
+        return None;
+    }
+    files[new_index as usize].to_str().map(String::from)
+}
+
+fn update_nav_buttons(prev: &gtk4::Button, next: &gtk4::Button, path: &str, suffix: &str) {
+    if path.is_empty() {
+        prev.set_sensitive(false);
+        next.set_sensitive(false);
+        return;
+    }
+    let files = list_sibling_files(path, suffix);
+    match files.iter().position(|p| p == Path::new(path)) {
+        Some(index) => {
+            prev.set_sensitive(index > 0);
+            next.set_sensitive(index + 1 < files.len());
+        }
+        None => {
+            debug!(target: "nav", "current file not found among {} siblings: {path}", files.len());
+            prev.set_sensitive(false);
+            next.set_sensitive(false);
+        }
+    }
+}
+
 pub fn setup_file_picker_row(
     builder: &gtk4::Builder,
     win: &adw::ApplicationWindow,
@@ -62,8 +117,20 @@ pub fn setup_file_picker_row(
     let clear_button: gtk4::Button = builder
         .object(format!("{}_clear_button", spec.prefix))
         .expect(spec.prefix);
+    let prev_button: gtk4::Button = builder
+        .object(format!("{}_prev_button", spec.prefix))
+        .expect(spec.prefix);
+    let next_button: gtk4::Button = builder
+        .object(format!("{}_next_button", spec.prefix))
+        .expect(spec.prefix);
 
     update_file_row(&row, settings.string(spec.key).as_str());
+    update_nav_buttons(
+        &prev_button,
+        &next_button,
+        settings.string(spec.key).as_str(),
+        spec.filter_suffix,
+    );
 
     let filter = gtk4::FileFilter::new();
     filter.set_name(Some(spec.filter_name));
@@ -98,8 +165,28 @@ pub fn setup_file_picker_row(
         settings_c.reset(key);
     });
 
+    let settings_c = settings.clone();
+    let suffix = spec.filter_suffix;
+    prev_button.connect_clicked(move |_| {
+        if let Some(current) = path_from_settings(&settings_c, key) {
+            if let Some(new_path) = sibling_path(&current, suffix, -1) {
+                let _ = settings_c.set_string(key, &new_path);
+            }
+        }
+    });
+
+    let settings_c = settings.clone();
+    next_button.connect_clicked(move |_| {
+        if let Some(current) = path_from_settings(&settings_c, key) {
+            if let Some(new_path) = sibling_path(&current, suffix, 1) {
+                let _ = settings_c.set_string(key, &new_path);
+            }
+        }
+    });
+
     settings.connect_changed(Some(spec.key), move |s, key| {
         update_file_row(&row, s.string(key).as_str());
+        update_nav_buttons(&prev_button, &next_button, s.string(key).as_str(), suffix);
     });
 }
 
@@ -112,7 +199,7 @@ fn update_file_row(row: &adw::ExpanderRow, path: &str) {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(path);
-        row.set_subtitle(name);
+        row.set_subtitle(&markup_escape_text(name));
         row.set_enable_expansion(true);
         row.set_expanded(true);
     }
@@ -172,6 +259,8 @@ pub fn setup_preset_actions(
     win: &adw::ApplicationWindow,
     settings: &gio::Settings,
     app: &adw::Application,
+    pedal_skip_normalize: Rc<Cell<bool>>,
+    amp_skip_normalize: Rc<Cell<bool>>,
 ) {
     let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
 
@@ -232,6 +321,8 @@ pub fn setup_preset_actions(
             let settings = settings_load.clone();
             let win = win_load.clone();
             let toast_overlay = toast_overlay_load.clone();
+            let pedal_skip_normalize = Rc::clone(&pedal_skip_normalize);
+            let amp_skip_normalize = Rc::clone(&amp_skip_normalize);
 
             dialog.open(Some(&win), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
@@ -257,6 +348,10 @@ pub fn setup_preset_actions(
                             }
                         };
                         debug!(target: "preset", "file loaded: {}", path.display());
+                        // A preset carries its own explicit output gain; don't let
+                        // auto-normalize clobber it once the profile finishes loading.
+                        pedal_skip_normalize.set(true);
+                        amp_skip_normalize.set(true);
                         preset.apply(&settings);
                     }
                 }

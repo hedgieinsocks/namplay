@@ -2,6 +2,7 @@ mod audio;
 mod preset;
 mod tray;
 mod ui;
+mod ui_menu;
 mod ui_settings;
 mod ui_tuner;
 
@@ -14,7 +15,7 @@ use std::sync::{
 
 use gio::prelude::*;
 use gtk4::prelude::*;
-use libadwaita::{self as adw, prelude::*};
+use libadwaita as adw;
 use log::{debug, error};
 
 use audio::{AudioEngine, EqPosition, InitialParams};
@@ -23,12 +24,13 @@ use ui::{
     setup_eq_position, setup_file_picker_row, setup_preset_actions, setup_reset_button,
     show_persistent_toast, FilePickerSpec,
 };
+use ui_menu::setup_primary_menu;
 use ui_settings::{setup_audio_window, setup_buffer_size_dropdown};
 use ui_tuner::create_tuner_window;
 
 pub(crate) const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
-const TARGET_LOUDNESS_LUFS: f64 = -18.0;
+const TARGET_LOUDNESS_DBFS: f64 = -18.0;
 
 const FILE_PICKERS: &[FilePickerSpec] = &[
     FilePickerSpec {
@@ -53,8 +55,6 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
         filter_suffix: "wav",
     },
 ];
-
-const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "cab_row"];
 
 macro_rules! slider_settings {
     ($($key:literal => $setter:ident),+ $(,)?) => {
@@ -146,16 +146,25 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
 
     let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
 
+    let pedal_profile_path = path_from_settings(&settings, "pedal-path");
+    let amp_profile_path = path_from_settings(&settings, "amp-path");
+
+    // The engine reports a load for the profile restored from settings at startup
+    // too, and a preset carries its own explicit output gain; both are cases where
+    // auto-normalize must not clobber an output gain that was just set on purpose.
+    let pedal_skip_normalize = Rc::new(Cell::new(pedal_profile_path.is_some()));
+    let amp_skip_normalize = Rc::new(Cell::new(amp_profile_path.is_some()));
+
     match AudioEngine::new(InitialParams {
         input_device: path_from_settings(&settings, "input-device"),
         output_device: path_from_settings(&settings, "output-device"),
         buffer_size: settings.int("buffer-size") as u32,
         gate_enabled: settings.boolean("gate-enabled"),
         gate_threshold_db: settings.double("gate-threshold") as f32,
-        pedal_profile_path: path_from_settings(&settings, "pedal-path"),
+        pedal_profile_path: pedal_profile_path.clone(),
         pedal_in_gain_db: settings.double("pedal-input") as f32,
         pedal_out_gain_db: settings.double("pedal-output") as f32,
-        amp_profile_path: path_from_settings(&settings, "amp-path"),
+        amp_profile_path: amp_profile_path.clone(),
         amp_in_gain_db: settings.double("amp-input") as f32,
         amp_out_gain_db: settings.double("amp-output") as f32,
         cab_path: path_from_settings(&settings, "cab-path"),
@@ -253,6 +262,36 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 "amp-output",
             );
 
+            let profile_loaded_rx = engine
+                .profile_loaded_rx
+                .borrow_mut()
+                .take()
+                .expect("profile-loaded receiver already taken");
+            glib::MainContext::default().spawn_local({
+                let settings = settings.clone();
+                let pedal_loudness = Arc::clone(&engine.pedal_loudness);
+                let amp_loudness = Arc::clone(&engine.amp_loudness);
+                let pedal_skip_normalize = Rc::clone(&pedal_skip_normalize);
+                let amp_skip_normalize = Rc::clone(&amp_skip_normalize);
+                async move {
+                    use futures_util::StreamExt;
+                    let mut profile_loaded_rx = profile_loaded_rx;
+                    while let Some(label) = profile_loaded_rx.next().await {
+                        let (loudness, key, skip_normalize) = match label {
+                            "Pedal" => (&pedal_loudness, "pedal-output", &pedal_skip_normalize),
+                            "Amp" => (&amp_loudness, "amp-output", &amp_skip_normalize),
+                            _ => continue,
+                        };
+                        if skip_normalize.replace(false) {
+                            continue;
+                        }
+                        if settings.boolean("normalize-output") {
+                            apply_normalize(&settings, loudness, key);
+                        }
+                    }
+                }
+            });
+
             settings.connect_changed(None, move |s, key| {
                 if dispatch_slider_change(&engine, s, key) {
                     return;
@@ -288,102 +327,22 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         glib::Propagation::Proceed
     });
 
-    app.add_action(&settings.create_action("collapse-on-launch"));
-    app.add_action(&settings.create_action("run-in-background"));
+    setup_primary_menu(app, &builder, &settings, &toast_overlay);
 
-    if settings.boolean("collapse-on-launch") {
-        for id in EXPANDER_ROW_IDS {
-            let row: adw::ExpanderRow = builder.object(*id).expect(id);
-            row.set_expanded(false);
-        }
-    }
-
-    if settings.boolean("run-in-background") {
-        request_background_permission(toast_overlay.clone());
-    }
-    settings.connect_changed(Some("run-in-background"), {
-        let toast_overlay = toast_overlay.clone();
-        move |s, key| {
-            if s.boolean(key) {
-                request_background_permission(toast_overlay.clone());
-            }
-        }
-    });
-
-    let audio_window: adw::Window = builder.object("audio_window").expect("audio_window");
-    let audio_action = gio::ActionEntry::builder("audio-settings")
-        .activate(move |_: &adw::Application, _, _| {
-            audio_window.present();
-        })
-        .build();
-
-    let browse_action = gio::ActionEntry::builder("browse-profiles")
-        .activate(|app: &adw::Application, _, _| {
-            gtk4::UriLauncher::new("https://www.tone3000.com/search").launch(
-                app.active_window().as_ref(),
-                None::<&gio::Cancellable>,
-                |_| {},
-            );
-        })
-        .build();
-
-    let about_action = gio::ActionEntry::builder("about")
-        .activate(|app: &adw::Application, _, _| {
-            let about = adw::AboutWindow::builder()
-                .application_name("Namplay")
-                .application_icon(APP_ID)
-                .version(env!("CARGO_PKG_VERSION"))
-                .developer_name("Run A2 Neural Amp Modeler profiles via PipeWire's JACK")
-                .developers(["Claude", "hedgieinsocks", "contributors"])
-                .license_type(gtk4::License::MitX11)
-                .website("https://github.com/hedgieinsocks/namplay")
-                .issue_url("https://github.com/hedgieinsocks/namplay/issues")
-                .modal(true)
-                .build();
-            about.set_transient_for(app.active_window().as_ref());
-            about.present();
-        })
-        .build();
-
-    app.add_action_entries([audio_action, browse_action, about_action]);
-
-    setup_preset_actions(&builder, &win, &settings, app);
+    setup_preset_actions(
+        &builder,
+        &win,
+        &settings,
+        app,
+        pedal_skip_normalize,
+        amp_skip_normalize,
+    );
 
     if start_hidden {
         win.set_visible(false);
     } else {
         win.present();
     }
-}
-
-fn request_background_permission(toast_overlay: adw::ToastOverlay) {
-    glib::MainContext::default().spawn_local(async move {
-        use ashpd::desktop::background::Background;
-        let result = async {
-            Background::request()
-                .reason("Namplay keeps processing audio while the window is closed")
-                .auto_start(false)
-                .dbus_activatable(false)
-                .send()
-                .await?
-                .response()
-        }
-        .await;
-        match result {
-            Ok(response) if response.run_in_background() => {
-                debug!(target: "background", "portal granted");
-            }
-            Ok(_) => {
-                let msg = "permission denied";
-                error!(target: "background", "{msg}");
-                show_persistent_toast(&toast_overlay, &format!("Background: {msg}"));
-            }
-            Err(e) => {
-                error!(target: "background", "portal request failed: {e}");
-                show_persistent_toast(&toast_overlay, "Background: portal request failed");
-            }
-        }
-    });
 }
 
 fn wire_toggle_button(
@@ -500,6 +459,16 @@ fn setup_tray(
     });
 }
 
+fn normalize_gain_db(loudness: f32) -> f64 {
+    (((TARGET_LOUDNESS_DBFS - loudness as f64) * 10.0).round() / 10.0).clamp(-20.0, 20.0)
+}
+
+fn apply_normalize(settings: &gio::Settings, loudness: &Mutex<Option<f32>>, key: &str) {
+    if let Some(loudness) = *loudness.lock().unwrap() {
+        let _ = settings.set_double(key, normalize_gain_db(loudness));
+    }
+}
+
 fn wire_normalize_button(
     builder: &gtk4::Builder,
     id: &str,
@@ -508,11 +477,5 @@ fn wire_normalize_button(
     key: &'static str,
 ) {
     let btn: gtk4::Button = builder.object(id).expect(id);
-    btn.connect_clicked(move |_| {
-        if let Some(loudness) = *loudness.lock().unwrap() {
-            let gain_db = (((TARGET_LOUDNESS_LUFS - loudness as f64) * 10.0).round() / 10.0)
-                .clamp(-20.0, 20.0);
-            let _ = settings.set_double(key, gain_db);
-        }
-    });
+    btn.connect_clicked(move |_| apply_normalize(&settings, &loudness, key));
 }

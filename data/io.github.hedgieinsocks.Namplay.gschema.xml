@@ -25,6 +25,10 @@
       <default>false</default>
       <summary>Show a system tray icon</summary>
     </key>
+    <key name="normalize-output" type="b">
+      <default>false</default>
+      <summary>Automatically normalize pedal and amp output on load</summary>
+    </key>
 
     <key name="input-device" type="s">
       <default>''</default>

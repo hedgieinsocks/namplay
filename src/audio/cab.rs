@@ -2,7 +2,9 @@ use std::sync::mpsc;
 
 use fft_convolver::FFTConvolver;
 use futures_channel::mpsc::UnboundedSender;
-use log::{debug, error, warn};
+use log::warn;
+
+use super::EngineEvent;
 
 pub(super) type CabConvolvers = (FFTConvolver<f32>, Option<FFTConvolver<f32>>);
 
@@ -11,38 +13,27 @@ pub(super) fn spawn(
     path: Option<String>,
     sample_rate: u32,
     block_size: usize,
-    warning_tx: UnboundedSender<String>,
+    event_tx: UnboundedSender<EngineEvent>,
 ) {
-    std::thread::spawn(move || {
-        let convolvers = match path {
-            None => {
-                debug!(target: "cab", "file cleared");
-                None
-            }
-            Some(p) => {
-                debug!(target: "cab", "loading file: {p}");
-                let result = load(&p, sample_rate, block_size, &warning_tx);
-                if result.is_some() {
-                    debug!(target: "cab", "file loaded: {p}");
-                } else {
-                    let detail = format!("failed to load file: {p}");
-                    error!(target: "cab", "{detail}");
-                    let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
-                }
-                result
-            }
-        };
-        let _ = tx.send(convolvers);
-    });
+    let event_tx_for_load = event_tx.clone();
+    super::spawn_background_load(
+        "cab",
+        tx,
+        path,
+        move |p| load(p, sample_rate, block_size, &event_tx_for_load),
+        || {},
+        |p| format!("Cab: failed to load file: {p}"),
+        event_tx,
+    );
 }
 
 fn load(
     path: &str,
     sample_rate: u32,
     block_size: usize,
-    warning_tx: &UnboundedSender<String>,
+    event_tx: &UnboundedSender<EngineEvent>,
 ) -> Option<CabConvolvers> {
-    let (left, right) = load_wav_channels(path, sample_rate, warning_tx)?;
+    let (left, right) = load_wav_channels(path, sample_rate, event_tx)?;
     let mut conv_l = FFTConvolver::<f32>::default();
     conv_l.init(block_size, &left).ok()?;
     let conv_r = right.and_then(|r| {
@@ -55,17 +46,21 @@ fn load(
 fn load_wav_channels(
     path: &str,
     jack_sample_rate: u32,
-    warning_tx: &UnboundedSender<String>,
+    event_tx: &UnboundedSender<EngineEvent>,
 ) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
     if spec.sample_rate != jack_sample_rate {
+        warn!(
+            target: "cab",
+            "file_sample_rate={}Hz jack_sample_rate={}Hz",
+            spec.sample_rate, jack_sample_rate
+        );
         let detail = format!(
             "file sample rate {}Hz != JACK sample rate {}Hz",
             spec.sample_rate, jack_sample_rate
         );
-        warn!(target: "cab", "{detail}");
-        let _ = warning_tx.unbounded_send(format!("Cab: {detail}"));
+        let _ = event_tx.unbounded_send(EngineEvent::Warning(format!("Cab: {detail}")));
     }
     let channels = spec.channels as usize;
     let samples: Vec<f32> = match spec.sample_format {

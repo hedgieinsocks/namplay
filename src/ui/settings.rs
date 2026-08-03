@@ -6,6 +6,7 @@ use gio::prelude::*;
 use gtk4::prelude::*;
 
 use crate::audio::AudioEngine;
+use crate::keys::*;
 
 const BUFFER_SIZES: &[u32] = &[16, 32, 64, 128, 192, 256, 320, 384, 448, 512];
 
@@ -26,16 +27,18 @@ pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Setti
             as u32
     };
 
-    dropdown.set_selected(index_for(settings.int("buffer-size")));
+    dropdown.set_selected(index_for(settings.int(BUFFER_SIZE)));
 
-    let settings_c = settings.clone();
-    dropdown.connect_selected_notify(move |dd| {
-        if let Some(&frames) = BUFFER_SIZES.get(dd.selected() as usize) {
-            let _ = settings_c.set_int("buffer-size", frames as i32);
+    dropdown.connect_selected_notify({
+        let settings = settings.clone();
+        move |dd| {
+            if let Some(&frames) = BUFFER_SIZES.get(dd.selected() as usize) {
+                let _ = settings.set_int(BUFFER_SIZE, frames as i32);
+            }
         }
     });
 
-    settings.connect_changed(Some("buffer-size"), move |s, key| {
+    settings.connect_changed(Some(BUFFER_SIZE), move |s, key| {
         dropdown.set_selected(index_for(s.int(key)));
     });
 }
@@ -59,16 +62,17 @@ pub fn setup_audio_window(
 
     setup_device_rows(builder, settings, Rc::clone(engine));
 
-    let engine_c = Rc::clone(engine);
-    settings.connect_changed(Some("buffer-size"), move |s, key| {
-        engine_c.set_buffer_size(s.int(key) as u32);
-        // PipeWire applies the new buffer size to the graph asynchronously,
-        // so jack_get_buffer_size() briefly still reports the old value.
-        let latency_label = latency_label.clone();
-        let engine = Rc::clone(&engine_c);
-        glib::timeout_add_local_once(Duration::from_millis(100), move || {
-            latency_label.set_text(&format_latency(engine.buffer_size(), engine.sample_rate()));
-        });
+    settings.connect_changed(Some(BUFFER_SIZE), {
+        let engine = Rc::clone(engine);
+        move |_, _| {
+            // PipeWire applies the new buffer size to the graph asynchronously,
+            // so jack_get_buffer_size() briefly still reports the old value.
+            let latency_label = latency_label.clone();
+            let engine = Rc::clone(&engine);
+            glib::timeout_add_local_once(Duration::from_millis(100), move || {
+                latency_label.set_text(&format_latency(engine.buffer_size(), engine.sample_rate()));
+            });
+        }
     });
 }
 
@@ -78,7 +82,7 @@ fn setup_device_rows(builder: &gtk4::Builder, settings: &gio::Settings, engine: 
         settings,
         "input_device_dropdown",
         "input_device_refresh_button",
-        "input-device",
+        INPUT_DEVICE,
         Rc::clone(&engine),
         AudioEngine::input_devices,
     );
@@ -87,7 +91,7 @@ fn setup_device_rows(builder: &gtk4::Builder, settings: &gio::Settings, engine: 
         settings,
         "output_device_dropdown",
         "output_device_refresh_button",
-        "output-device",
+        OUTPUT_DEVICE,
         engine,
         AudioEngine::output_devices,
     );
@@ -108,7 +112,7 @@ fn setup_device_dropdown(
     const NONE_LABEL: &str = "None";
     let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
-    let rebuild: Rc<dyn Fn(Vec<String>)> = Rc::new({
+    let rebuild = {
         let dropdown = dropdown.clone();
         let known = Rc::clone(&known);
         let settings = settings.clone();
@@ -123,28 +127,32 @@ fn setup_device_dropdown(
             dropdown.set_model(Some(&model));
             dropdown.set_selected(selected_index(&current, &devices));
         }
-    });
+    };
 
     rebuild(list_devices(&engine));
 
-    let settings_c = settings.clone();
-    dropdown.connect_selected_notify(move |dd| {
-        let name = if dd.selected() == 0 {
-            String::new()
-        } else {
-            dd.selected_item()
-                .and_downcast::<gtk4::StringObject>()
-                .map(|s| s.string().to_string())
-                .unwrap_or_default()
-        };
-        let _ = settings_c.set_string(key, &name);
+    dropdown.connect_selected_notify({
+        let settings = settings.clone();
+        move |dd| {
+            let name = if dd.selected() == 0 {
+                String::new()
+            } else {
+                dd.selected_item()
+                    .and_downcast::<gtk4::StringObject>()
+                    .map(|s| s.string().to_string())
+                    .unwrap_or_default()
+            };
+            let _ = settings.set_string(key, &name);
+        }
     });
 
-    let dropdown_c = dropdown.clone();
-    let known_c = Rc::clone(&known);
-    settings.connect_changed(Some(key), move |s, k| {
-        let current = s.string(k).to_string();
-        dropdown_c.set_selected(selected_index(&current, &known_c.borrow()));
+    settings.connect_changed(Some(key), {
+        let dropdown = dropdown.clone();
+        let known = Rc::clone(&known);
+        move |s, k| {
+            let current = s.string(k).to_string();
+            dropdown.set_selected(selected_index(&current, &known.borrow()));
+        }
     });
 
     refresh_button.connect_clicked(move |_| {

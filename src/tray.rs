@@ -73,7 +73,7 @@ pub fn spawn(state: TrayState) -> Option<Handle<TrayState>> {
     match state.disable_dbus_name(true).spawn() {
         Ok(handle) => Some(handle),
         Err(e) => {
-            error!(target: "tray", "failed to start tray icon: {e}");
+            error!(target: "tray", "state=error reason={e}");
             None
         }
     }

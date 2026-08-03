@@ -39,7 +39,7 @@
       <summary>JACK node connected to Namplay's outputs</summary>
     </key>
     <key name="buffer-size" type="i">
-      <range min="16" max="1024"/>
+      <range min="16" max="512"/>
       <default>256</default>
       <summary>JACK buffer size in frames</summary>
     </key>

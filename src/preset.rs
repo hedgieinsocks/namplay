@@ -2,6 +2,7 @@ use gio::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::EqPosition;
+use crate::keys::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct PresetGate {
@@ -42,7 +43,7 @@ pub struct Preset {
     pub cab: PresetCab,
 }
 
-fn round1(v: f64) -> f64 {
+pub(crate) fn round1(v: f64) -> f64 {
     (v * 10.0).round() / 10.0
 }
 
@@ -50,55 +51,55 @@ impl Preset {
     pub fn from_settings(settings: &gio::Settings) -> Self {
         Preset {
             gate: PresetGate {
-                enabled: settings.boolean("gate-enabled"),
-                threshold: round1(settings.double("gate-threshold")),
+                enabled: settings.boolean(GATE_ENABLED),
+                threshold: round1(settings.double(GATE_THRESHOLD)),
             },
             eq: PresetEq {
-                enabled: settings.boolean("eq-enabled"),
-                position: settings.string("eq-position").to_string(),
-                hp: settings.double("eq-hp").round() as u32,
-                low: round1(settings.double("eq-low")),
-                mid: round1(settings.double("eq-mid")),
-                high: round1(settings.double("eq-high")),
-                lp: settings.double("eq-lp").round() as u32,
+                enabled: settings.boolean(EQ_ENABLED),
+                position: settings.string(EQ_POSITION).to_string(),
+                hp: settings.double(EQ_HP).round() as u32,
+                low: round1(settings.double(EQ_LOW)),
+                mid: round1(settings.double(EQ_MID)),
+                high: round1(settings.double(EQ_HIGH)),
+                lp: settings.double(EQ_LP).round() as u32,
             },
             pedal: PresetProfile {
-                file: settings.string("pedal-path").to_string(),
-                input: round1(settings.double("pedal-input")),
-                output: round1(settings.double("pedal-output")),
+                file: settings.string(PEDAL_PATH).to_string(),
+                input: round1(settings.double(PEDAL_INPUT)),
+                output: round1(settings.double(PEDAL_OUTPUT)),
             },
             amp: PresetProfile {
-                file: settings.string("amp-path").to_string(),
-                input: round1(settings.double("amp-input")),
-                output: round1(settings.double("amp-output")),
+                file: settings.string(AMP_PATH).to_string(),
+                input: round1(settings.double(AMP_INPUT)),
+                output: round1(settings.double(AMP_OUTPUT)),
             },
             cab: PresetCab {
-                file: settings.string("cab-path").to_string(),
-                level: round1(settings.double("cab-level")),
+                file: settings.string(CAB_PATH).to_string(),
+                level: round1(settings.double(CAB_LEVEL)),
             },
         }
     }
 
     pub fn apply(&self, settings: &gio::Settings) {
-        let _ = settings.set_boolean("gate-enabled", self.gate.enabled);
-        let _ = settings.set_double("gate-threshold", self.gate.threshold);
-        let _ = settings.set_boolean("eq-enabled", self.eq.enabled);
+        let _ = settings.set_boolean(GATE_ENABLED, self.gate.enabled);
+        let _ = settings.set_double(GATE_THRESHOLD, self.gate.threshold);
+        let _ = settings.set_boolean(EQ_ENABLED, self.eq.enabled);
         let _ = settings.set_string(
-            "eq-position",
+            EQ_POSITION,
             EqPosition::from_setting(&self.eq.position).setting(),
         );
-        let _ = settings.set_double("eq-hp", self.eq.hp as f64);
-        let _ = settings.set_double("eq-low", self.eq.low);
-        let _ = settings.set_double("eq-mid", self.eq.mid);
-        let _ = settings.set_double("eq-high", self.eq.high);
-        let _ = settings.set_double("eq-lp", self.eq.lp as f64);
-        let _ = settings.set_string("pedal-path", &self.pedal.file);
-        let _ = settings.set_double("pedal-input", self.pedal.input);
-        let _ = settings.set_double("pedal-output", self.pedal.output);
-        let _ = settings.set_string("amp-path", &self.amp.file);
-        let _ = settings.set_double("amp-input", self.amp.input);
-        let _ = settings.set_double("amp-output", self.amp.output);
-        let _ = settings.set_string("cab-path", &self.cab.file);
-        let _ = settings.set_double("cab-level", self.cab.level);
+        let _ = settings.set_double(EQ_HP, self.eq.hp as f64);
+        let _ = settings.set_double(EQ_LOW, self.eq.low);
+        let _ = settings.set_double(EQ_MID, self.eq.mid);
+        let _ = settings.set_double(EQ_HIGH, self.eq.high);
+        let _ = settings.set_double(EQ_LP, self.eq.lp as f64);
+        let _ = settings.set_string(PEDAL_PATH, &self.pedal.file);
+        let _ = settings.set_double(PEDAL_INPUT, self.pedal.input);
+        let _ = settings.set_double(PEDAL_OUTPUT, self.pedal.output);
+        let _ = settings.set_string(AMP_PATH, &self.amp.file);
+        let _ = settings.set_double(AMP_INPUT, self.amp.input);
+        let _ = settings.set_double(AMP_OUTPUT, self.amp.output);
+        let _ = settings.set_string(CAB_PATH, &self.cab.file);
+        let _ = settings.set_double(CAB_LEVEL, self.cab.level);
     }
 }

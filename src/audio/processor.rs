@@ -1,8 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
-    mpsc, Arc, Mutex,
-};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, mpsc, Arc, Mutex};
 
 use fft_convolver::FFTConvolver;
 use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
@@ -11,36 +8,41 @@ use nam_rs::Model;
 use super::cab::CabConvolvers;
 use super::eq::{EqChannel, EqCoeffs};
 use super::gate::Gate;
-use super::util::AtomicF32;
 use super::EqPosition;
+
+#[derive(Clone, Copy)]
+pub(crate) struct Params {
+    pub gate_enabled: bool,
+    pub gate_threshold_db: f32,
+    pub pedal_in_gain: f32,
+    pub pedal_out_gain: f32,
+    pub amp_in_gain: f32,
+    pub amp_out_gain: f32,
+    pub cab_level: f32,
+    pub eq_enabled: bool,
+    pub eq_pos: EqPosition,
+    pub eq_low_db: f32,
+    pub eq_mid_db: f32,
+    pub eq_high_db: f32,
+    pub eq_hp_freq: f32,
+    pub eq_lp_freq: f32,
+}
 
 pub(super) struct NamProcessor {
     pub(super) mute: Arc<AtomicBool>,
-    pub(super) gate_enabled: Arc<AtomicBool>,
-    pub(super) gate_threshold_db: Arc<AtomicF32>,
     pub(super) gate: Gate,
     pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_pedal_profile: Option<Model>,
     pub(super) pedal_bypass: Arc<AtomicBool>,
-    pub(super) pedal_in_gain: Arc<AtomicF32>,
-    pub(super) pedal_out_gain: Arc<AtomicF32>,
     pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_amp_profile: Option<Model>,
     pub(super) amp_bypass: Arc<AtomicBool>,
-    pub(super) amp_in_gain: Arc<AtomicF32>,
-    pub(super) amp_out_gain: Arc<AtomicF32>,
     pub(super) cab_rx: mpsc::Receiver<Option<CabConvolvers>>,
     pub(super) current_cab_l: Option<FFTConvolver<f32>>,
     pub(super) current_cab_r: Option<FFTConvolver<f32>>,
     pub(super) cab_bypass: Arc<AtomicBool>,
-    pub(super) cab_level: Arc<AtomicF32>,
-    pub(super) eq_enabled: Arc<AtomicBool>,
-    pub(super) eq_pos: Arc<AtomicU32>,
-    pub(super) eq_low_db: Arc<AtomicF32>,
-    pub(super) eq_mid_db: Arc<AtomicF32>,
-    pub(super) eq_high_db: Arc<AtomicF32>,
-    pub(super) eq_hp_freq: Arc<AtomicF32>,
-    pub(super) eq_lp_freq: Arc<AtomicF32>,
+    pub(super) params: Arc<Mutex<Params>>,
+    pub(super) last_params: Params,
     pub(super) eq_coeffs: EqCoeffs,
     pub(super) eq_l: EqChannel,
     pub(super) eq_r: EqChannel,
@@ -109,65 +111,62 @@ impl ProcessHandler for NamProcessor {
             return Control::Continue;
         }
 
-        let gate_enabled = self.gate_enabled.load(Ordering::Relaxed);
-        if gate_enabled {
-            self.gate.update(self.gate_threshold_db.get());
+        if let Ok(guard) = self.params.try_lock() {
+            self.last_params = *guard;
+        }
+        let p = self.last_params;
+
+        if p.gate_enabled {
+            self.gate.update(p.gate_threshold_db);
         }
 
-        let eq_enabled = self.eq_enabled.load(Ordering::Relaxed);
-        let eq_pos = EqPosition::from_index(self.eq_pos.load(Ordering::Relaxed));
-        if eq_enabled {
+        if p.eq_enabled {
             self.eq_coeffs.update(
-                self.eq_low_db.get(),
-                self.eq_mid_db.get(),
-                self.eq_high_db.get(),
-                self.eq_hp_freq.get(),
-                self.eq_lp_freq.get(),
+                p.eq_low_db,
+                p.eq_mid_db,
+                p.eq_high_db,
+                p.eq_hp_freq,
+                p.eq_lp_freq,
             );
         }
 
         let pedal_bypass = self.pedal_bypass.load(Ordering::Relaxed);
-        let pedal_in_gain = self.pedal_in_gain.get();
-        let pedal_out_gain = self.pedal_out_gain.get();
         let amp_bypass = self.amp_bypass.load(Ordering::Relaxed);
-        let amp_in_gain = self.amp_in_gain.get();
-        let amp_out_gain = self.amp_out_gain.get();
         let cab_bypass = self.cab_bypass.load(Ordering::Relaxed);
-        let cab_level = self.cab_level.get();
 
         let input = self.in_port.as_slice(ps);
         let out_l = self.out_port_1.as_mut_slice(ps);
         let out_r = self.out_port_2.as_mut_slice(ps);
 
         for (o, &i) in out_l.iter_mut().zip(input) {
-            *o = if gate_enabled {
+            *o = if p.gate_enabled {
                 self.gate.process_sample(i)
             } else {
                 i
             };
         }
 
-        if eq_enabled && eq_pos == EqPosition::PrePedal {
+        if p.eq_enabled && p.eq_pos == EqPosition::PrePedal {
             self.eq_l.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !pedal_bypass {
             if let Some(pedal) = &mut self.current_pedal_profile {
-                apply_gain(out_l, pedal_in_gain);
+                apply_gain(out_l, p.pedal_in_gain);
                 pedal.process_buffer(out_l);
-                apply_gain(out_l, pedal_out_gain);
+                apply_gain(out_l, p.pedal_out_gain);
             }
         }
 
-        if eq_enabled && eq_pos == EqPosition::PreAmp {
+        if p.eq_enabled && p.eq_pos == EqPosition::PreAmp {
             self.eq_l.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !amp_bypass {
             if let Some(amp) = &mut self.current_amp_profile {
-                apply_gain(out_l, amp_in_gain);
+                apply_gain(out_l, p.amp_in_gain);
                 amp.process_buffer(out_l);
-                apply_gain(out_l, amp_out_gain);
+                apply_gain(out_l, p.amp_out_gain);
             }
         }
 
@@ -178,16 +177,16 @@ impl ProcessHandler for NamProcessor {
             if let Some(cab_l) = &mut self.current_cab_l {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
                 let _ = cab_l.process(&self.conv_buf[..n], &mut out_l[..n]);
-                apply_gain(&mut out_l[..n], cab_level);
+                apply_gain(&mut out_l[..n], p.cab_level);
                 if let Some(cab_r) = &mut self.current_cab_r {
                     let _ = cab_r.process(&self.conv_buf[..n], &mut out_r[..n]);
-                    apply_gain(&mut out_r[..n], cab_level);
+                    apply_gain(&mut out_r[..n], p.cab_level);
                     stereo_cab = true;
                 }
             }
         }
 
-        if eq_enabled && eq_pos == EqPosition::PostCab {
+        if p.eq_enabled && p.eq_pos == EqPosition::PostCab {
             self.eq_l.process_buffer(out_l, &self.eq_coeffs);
             if stereo_cab {
                 self.eq_r.process_buffer(out_r, &self.eq_coeffs);

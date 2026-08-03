@@ -1,10 +1,8 @@
 mod audio;
+mod keys;
 mod preset;
 mod tray;
 mod ui;
-mod ui_menu;
-mod ui_settings;
-mod ui_tuner;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -18,15 +16,14 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use log::{debug, error};
 
-use audio::{AudioEngine, EqPosition, InitialParams};
+use audio::{AudioEngine, EngineEvent, EqPosition, InitialParams, ProfileKind};
+use keys::*;
 use ui::{
-    bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
-    setup_eq_position, setup_file_picker_row, setup_preset_actions, setup_reset_button,
+    bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
+    save_window_state, setup_audio_window, setup_buffer_size_dropdown, setup_eq_position,
+    setup_file_picker_row, setup_preset_actions, setup_primary_menu, setup_reset_button,
     show_persistent_toast, FilePickerSpec,
 };
-use ui_menu::setup_primary_menu;
-use ui_settings::{setup_audio_window, setup_buffer_size_dropdown};
-use ui_tuner::create_tuner_window;
 
 pub(crate) const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
 const UI: &str = include_str!(concat!(env!("OUT_DIR"), "/window.ui"));
@@ -35,55 +32,49 @@ const TARGET_LOUDNESS_DBFS: f64 = -18.0;
 const FILE_PICKERS: &[FilePickerSpec] = &[
     FilePickerSpec {
         prefix: "pedal",
-        key: "pedal-path",
+        key: PEDAL_PATH,
         title: "Choose Pedal Profile",
         filter_name: "NAM Profiles",
         filter_suffix: "nam",
     },
     FilePickerSpec {
         prefix: "amp",
-        key: "amp-path",
+        key: AMP_PATH,
         title: "Choose Amp Profile",
         filter_name: "NAM Profiles",
         filter_suffix: "nam",
     },
     FilePickerSpec {
         prefix: "cab",
-        key: "cab-path",
+        key: CAB_PATH,
         title: "Choose Cabinet IR",
         filter_name: "WAV Files",
         filter_suffix: "wav",
     },
 ];
 
-macro_rules! slider_settings {
-    ($($key:literal => $setter:ident),+ $(,)?) => {
-        const SLIDER_KEYS: &[&str] = &[$($key),+];
+const SLIDERS: &[(&str, fn(&AudioEngine, f32))] = &[
+    (GATE_THRESHOLD, AudioEngine::set_gate_threshold_db),
+    (EQ_HP, AudioEngine::set_eq_hp_freq),
+    (EQ_LOW, AudioEngine::set_eq_low_db),
+    (EQ_MID, AudioEngine::set_eq_mid_db),
+    (EQ_HIGH, AudioEngine::set_eq_high_db),
+    (EQ_LP, AudioEngine::set_eq_lp_freq),
+    (PEDAL_INPUT, AudioEngine::set_pedal_in_gain_db),
+    (PEDAL_OUTPUT, AudioEngine::set_pedal_out_gain_db),
+    (AMP_INPUT, AudioEngine::set_amp_in_gain_db),
+    (AMP_OUTPUT, AudioEngine::set_amp_out_gain_db),
+    (CAB_LEVEL, AudioEngine::set_cab_level_db),
+];
 
-        fn dispatch_slider_change(engine: &AudioEngine, s: &gio::Settings, key: &str) -> bool {
-            match key {
-                $($key => {
-                    engine.$setter(s.double(key) as f32);
-                    true
-                })+
-                _ => false,
-            }
+fn dispatch_slider_change(engine: &AudioEngine, s: &gio::Settings, key: &str) -> bool {
+    match SLIDERS.iter().find(|(k, _)| *k == key) {
+        Some((_, setter)) => {
+            setter(engine, s.double(key) as f32);
+            true
         }
-    };
-}
-
-slider_settings! {
-    "gate-threshold" => set_gate_threshold_db,
-    "eq-hp" => set_eq_hp_freq,
-    "eq-low" => set_eq_low_db,
-    "eq-mid" => set_eq_mid_db,
-    "eq-high" => set_eq_high_db,
-    "eq-lp" => set_eq_lp_freq,
-    "pedal-input" => set_pedal_in_gain_db,
-    "pedal-output" => set_pedal_out_gain_db,
-    "amp-input" => set_amp_in_gain_db,
-    "amp-output" => set_amp_out_gain_db,
-    "cab-level" => set_cab_level_db,
+        None => false,
+    }
 }
 
 fn main() {
@@ -132,10 +123,10 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         setup_file_picker_row(&builder, &win, &settings, spec);
     }
 
-    bind_toggle(&builder, &settings, "gate_row", "gate-enabled");
-    bind_toggle(&builder, &settings, "eq_row", "eq-enabled");
+    bind_toggle(&builder, &settings, "gate_row", GATE_ENABLED);
+    bind_toggle(&builder, &settings, "eq_row", EQ_ENABLED);
 
-    for key in SLIDER_KEYS {
+    for (key, _) in SLIDERS {
         let id_base = key.replace('-', "_");
         bind_adjustment(&builder, &settings, &format!("{id_base}_adjustment"), key);
         setup_reset_button(&builder, &settings, &format!("{id_base}_reset_button"), key);
@@ -146,8 +137,8 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
 
     let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
 
-    let pedal_profile_path = path_from_settings(&settings, "pedal-path");
-    let amp_profile_path = path_from_settings(&settings, "amp-path");
+    let pedal_profile_path = path_from_settings(&settings, PEDAL_PATH);
+    let amp_profile_path = path_from_settings(&settings, AMP_PATH);
 
     // The engine reports a load for the profile restored from settings at startup
     // too, and a preset carries its own explicit output gain; both are cases where
@@ -156,68 +147,57 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     let amp_skip_normalize = Rc::new(Cell::new(amp_profile_path.is_some()));
 
     match AudioEngine::new(InitialParams {
-        input_device: path_from_settings(&settings, "input-device"),
-        output_device: path_from_settings(&settings, "output-device"),
-        buffer_size: settings.int("buffer-size") as u32,
-        gate_enabled: settings.boolean("gate-enabled"),
-        gate_threshold_db: settings.double("gate-threshold") as f32,
+        input_device: path_from_settings(&settings, INPUT_DEVICE),
+        output_device: path_from_settings(&settings, OUTPUT_DEVICE),
+        buffer_size: settings.int(BUFFER_SIZE) as u32,
+        gate_enabled: settings.boolean(GATE_ENABLED),
+        gate_threshold_db: settings.double(GATE_THRESHOLD) as f32,
         pedal_profile_path: pedal_profile_path.clone(),
-        pedal_in_gain_db: settings.double("pedal-input") as f32,
-        pedal_out_gain_db: settings.double("pedal-output") as f32,
+        pedal_in_gain_db: settings.double(PEDAL_INPUT) as f32,
+        pedal_out_gain_db: settings.double(PEDAL_OUTPUT) as f32,
         amp_profile_path: amp_profile_path.clone(),
-        amp_in_gain_db: settings.double("amp-input") as f32,
-        amp_out_gain_db: settings.double("amp-output") as f32,
-        cab_path: path_from_settings(&settings, "cab-path"),
-        cab_level_db: settings.double("cab-level") as f32,
-        eq_enabled: settings.boolean("eq-enabled"),
-        eq_pos: EqPosition::from_setting(settings.string("eq-position").as_str()),
-        eq_low_db: settings.double("eq-low") as f32,
-        eq_mid_db: settings.double("eq-mid") as f32,
-        eq_high_db: settings.double("eq-high") as f32,
-        eq_hp_freq: settings.double("eq-hp") as f32,
-        eq_lp_freq: settings.double("eq-lp") as f32,
+        amp_in_gain_db: settings.double(AMP_INPUT) as f32,
+        amp_out_gain_db: settings.double(AMP_OUTPUT) as f32,
+        cab_path: path_from_settings(&settings, CAB_PATH),
+        cab_level_db: settings.double(CAB_LEVEL) as f32,
+        eq_enabled: settings.boolean(EQ_ENABLED),
+        eq_pos: EqPosition::from_setting(settings.string(EQ_POSITION).as_str()),
+        eq_low_db: settings.double(EQ_LOW) as f32,
+        eq_mid_db: settings.double(EQ_MID) as f32,
+        eq_high_db: settings.double(EQ_HIGH) as f32,
+        eq_hp_freq: settings.double(EQ_HP) as f32,
+        eq_lp_freq: settings.double(EQ_LP) as f32,
     }) {
         Ok(engine) => {
-            let warning_rx = engine
-                .warning_rx
-                .borrow_mut()
-                .take()
-                .expect("warning receiver already taken");
-            glib::MainContext::default().spawn_local({
-                let toast_overlay = toast_overlay.clone();
-                async move {
-                    use futures_util::StreamExt;
-                    let mut warning_rx = warning_rx;
-                    while let Some(msg) = warning_rx.next().await {
-                        show_persistent_toast(&toast_overlay, &msg);
-                    }
-                }
-            });
-
             let engine = Rc::new(engine);
             setup_audio_window(&builder, &settings, &engine);
 
-            wire_toggle_button(&builder, "mute_button", "mute", Arc::clone(&engine.mute));
-            wire_toggle_button(
-                &builder,
-                "pedal_bypass_button",
-                "pedal",
-                Arc::clone(&engine.pedal_bypass),
-            );
-            wire_toggle_button(
-                &builder,
-                "amp_bypass_button",
-                "amp",
-                Arc::clone(&engine.amp_bypass),
-            );
-            wire_toggle_button(
-                &builder,
-                "cab_bypass_button",
-                "cab",
-                Arc::clone(&engine.cab_bypass),
-            );
+            setup_toggle_button(&builder, "mute_button", {
+                let engine = Rc::clone(&engine);
+                move |v| engine.set_mute(v)
+            });
+            setup_toggle_button(&builder, "pedal_bypass_button", {
+                let engine = Rc::clone(&engine);
+                move |v| engine.set_pedal_bypass(v)
+            });
+            setup_toggle_button(&builder, "amp_bypass_button", {
+                let engine = Rc::clone(&engine);
+                move |v| engine.set_amp_bypass(v)
+            });
+            setup_toggle_button(&builder, "cab_bypass_button", {
+                let engine = Rc::clone(&engine);
+                move |v| engine.set_cab_bypass(v)
+            });
 
-            setup_tray(app, &win, &builder, &settings, &engine, start_hidden);
+            setup_tray(
+                app,
+                &win,
+                &builder,
+                &settings,
+                &engine,
+                start_hidden,
+                &toast_overlay,
+            );
 
             let tuner_hz_rx = engine
                 .tuner_hz_rx
@@ -247,27 +227,28 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 tuner_enabled.store(false, Ordering::Relaxed);
             });
 
-            wire_normalize_button(
+            setup_normalize_button(
                 &builder,
                 "pedal_output_normalize_button",
                 Arc::clone(&engine.pedal_loudness),
-                settings.clone(),
-                "pedal-output",
+                &settings,
+                PEDAL_OUTPUT,
             );
-            wire_normalize_button(
+            setup_normalize_button(
                 &builder,
                 "amp_output_normalize_button",
                 Arc::clone(&engine.amp_loudness),
-                settings.clone(),
-                "amp-output",
+                &settings,
+                AMP_OUTPUT,
             );
 
-            let profile_loaded_rx = engine
-                .profile_loaded_rx
+            let event_rx = engine
+                .event_rx
                 .borrow_mut()
                 .take()
-                .expect("profile-loaded receiver already taken");
+                .expect("event receiver already taken");
             glib::MainContext::default().spawn_local({
+                let toast_overlay = toast_overlay.clone();
                 let settings = settings.clone();
                 let pedal_loudness = Arc::clone(&engine.pedal_loudness);
                 let amp_loudness = Arc::clone(&engine.amp_loudness);
@@ -275,18 +256,28 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 let amp_skip_normalize = Rc::clone(&amp_skip_normalize);
                 async move {
                     use futures_util::StreamExt;
-                    let mut profile_loaded_rx = profile_loaded_rx;
-                    while let Some(label) = profile_loaded_rx.next().await {
-                        let (loudness, key, skip_normalize) = match label {
-                            "Pedal" => (&pedal_loudness, "pedal-output", &pedal_skip_normalize),
-                            "Amp" => (&amp_loudness, "amp-output", &amp_skip_normalize),
-                            _ => continue,
-                        };
-                        if skip_normalize.replace(false) {
-                            continue;
-                        }
-                        if settings.boolean("normalize-output") {
-                            apply_normalize(&settings, loudness, key);
+                    let mut event_rx = event_rx;
+                    while let Some(event) = event_rx.next().await {
+                        match event {
+                            EngineEvent::Warning(msg) => {
+                                show_persistent_toast(&toast_overlay, &msg)
+                            }
+                            EngineEvent::ProfileLoaded(kind) => {
+                                let (loudness, key, skip_normalize) = match kind {
+                                    ProfileKind::Pedal => {
+                                        (&pedal_loudness, PEDAL_OUTPUT, &pedal_skip_normalize)
+                                    }
+                                    ProfileKind::Amp => {
+                                        (&amp_loudness, AMP_OUTPUT, &amp_skip_normalize)
+                                    }
+                                };
+                                if skip_normalize.replace(false) {
+                                    continue;
+                                }
+                                if settings.boolean(NORMALIZE_OUTPUT) {
+                                    apply_normalize(&settings, loudness, key);
+                                }
+                            }
                         }
                     }
                 }
@@ -297,14 +288,15 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                     return;
                 }
                 match key {
-                    "input-device" => engine.set_input_device(path_from_settings(s, key)),
-                    "output-device" => engine.set_output_device(path_from_settings(s, key)),
-                    "gate-enabled" => engine.set_gate_enabled(s.boolean(key)),
-                    "pedal-path" => engine.load_pedal_profile(path_from_settings(s, key)),
-                    "amp-path" => engine.load_amp_profile(path_from_settings(s, key)),
-                    "cab-path" => engine.load_cab(path_from_settings(s, key)),
-                    "eq-enabled" => engine.set_eq_enabled(s.boolean(key)),
-                    "eq-position" => {
+                    INPUT_DEVICE => engine.set_input_device(path_from_settings(s, key)),
+                    OUTPUT_DEVICE => engine.set_output_device(path_from_settings(s, key)),
+                    BUFFER_SIZE => engine.set_buffer_size(s.int(key) as u32),
+                    GATE_ENABLED => engine.set_gate_enabled(s.boolean(key)),
+                    PEDAL_PATH => engine.load_pedal_profile(path_from_settings(s, key)),
+                    AMP_PATH => engine.load_amp_profile(path_from_settings(s, key)),
+                    CAB_PATH => engine.load_cab(path_from_settings(s, key)),
+                    EQ_ENABLED => engine.set_eq_enabled(s.boolean(key)),
+                    EQ_POSITION => {
                         engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
                     }
                     _ => {}
@@ -312,19 +304,21 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
             });
         }
         Err(e) => {
-            error!(target: "audio", "Audio unavailable: {e}");
+            error!(target: "audio", "state=unavailable reason={e}");
             show_persistent_toast(&toast_overlay, "Audio unavailable");
         }
     }
 
-    let settings_clone = settings.clone();
-    win.connect_close_request(move |w| {
-        save_window_state(w, &settings_clone);
-        if settings_clone.boolean("run-in-background") {
-            w.set_visible(false);
-            return glib::Propagation::Stop;
+    win.connect_close_request({
+        let settings = settings.clone();
+        move |w| {
+            save_window_state(w, &settings);
+            if settings.boolean("run-in-background") {
+                w.set_visible(false);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
         }
-        glib::Propagation::Proceed
     });
 
     setup_primary_menu(app, &builder, &settings, &toast_overlay);
@@ -345,22 +339,16 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     }
 }
 
-fn wire_toggle_button(
-    builder: &gtk4::Builder,
-    id: &str,
-    label: &'static str,
-    flag: Arc<AtomicBool>,
-) {
+fn setup_toggle_button(builder: &gtk4::Builder, id: &str, set: impl Fn(bool) + 'static) {
     let btn: gtk4::ToggleButton = builder.object(id).expect(id);
     btn.connect_toggled(move |btn| {
         let active = btn.is_active();
-        debug!(target: label, "{}", if active { "on" } else { "off" });
         btn.set_icon_name(if active {
             "audio-volume-muted-symbolic"
         } else {
             "audio-volume-high-symbolic"
         });
-        flag.store(active, Ordering::Relaxed);
+        set(active);
     });
 }
 
@@ -371,6 +359,7 @@ fn setup_tray(
     settings: &gio::Settings,
     engine: &Rc<AudioEngine>,
     start_hidden: bool,
+    toast_overlay: &adw::ToastOverlay,
 ) {
     let (cmd_tx, mut cmd_rx) = futures_channel::mpsc::unbounded();
     let window_visible = Arc::new(AtomicBool::new(!start_hidden));
@@ -404,11 +393,12 @@ fn setup_tray(
         }
     });
 
-    let set_enabled: Rc<dyn Fn(bool)> = Rc::new({
+    let set_enabled = {
         let tray_handle = Rc::clone(&tray_handle);
         let mute = Arc::clone(&engine.mute);
         let window_visible = Arc::clone(&window_visible);
         let cmd_tx = cmd_tx.clone();
+        let toast_overlay = toast_overlay.clone();
         move |enabled: bool| {
             let mut handle = tray_handle.borrow_mut();
             if enabled {
@@ -419,20 +409,20 @@ fn setup_tray(
                         cmd_tx: cmd_tx.clone(),
                     };
                     *handle = tray::spawn(state);
+                    if handle.is_none() {
+                        show_persistent_toast(&toast_overlay, "Tray: failed to start icon");
+                    }
                 }
             } else if let Some(h) = handle.take() {
                 h.shutdown().wait();
             }
         }
-    });
+    };
 
-    set_enabled(settings.boolean("tray-icon"));
+    set_enabled(settings.boolean(TRAY_ICON));
 
-    app.add_action(&settings.create_action("tray-icon"));
-    settings.connect_changed(Some("tray-icon"), {
-        let set_enabled = Rc::clone(&set_enabled);
-        move |s, key| set_enabled(s.boolean(key))
-    });
+    app.add_action(&settings.create_action(TRAY_ICON));
+    settings.connect_changed(Some(TRAY_ICON), move |s, key| set_enabled(s.boolean(key)));
 
     let mute_button: gtk4::ToggleButton = builder.object("mute_button").expect("mute_button");
     mute_button.connect_toggled(move |_| refresh_tray());
@@ -460,7 +450,7 @@ fn setup_tray(
 }
 
 fn normalize_gain_db(loudness: f32) -> f64 {
-    (((TARGET_LOUDNESS_DBFS - loudness as f64) * 10.0).round() / 10.0).clamp(-20.0, 20.0)
+    preset::round1(TARGET_LOUDNESS_DBFS - loudness as f64).clamp(-20.0, 20.0)
 }
 
 fn apply_normalize(settings: &gio::Settings, loudness: &Mutex<Option<f32>>, key: &str) {
@@ -469,13 +459,14 @@ fn apply_normalize(settings: &gio::Settings, loudness: &Mutex<Option<f32>>, key:
     }
 }
 
-fn wire_normalize_button(
+fn setup_normalize_button(
     builder: &gtk4::Builder,
     id: &str,
     loudness: Arc<Mutex<Option<f32>>>,
-    settings: gio::Settings,
+    settings: &gio::Settings,
     key: &'static str,
 ) {
     let btn: gtk4::Button = builder.object(id).expect(id);
+    let settings = settings.clone();
     btn.connect_clicked(move |_| apply_normalize(&settings, &loudness, key));
 }

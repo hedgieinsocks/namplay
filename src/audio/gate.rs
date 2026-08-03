@@ -1,4 +1,9 @@
-use super::util::db_to_gain;
+use super::db_to_gain;
+
+const HYSTERESIS_DB: f32 = 6.0;
+const ATTACK_TIME_S: f32 = 0.001;
+const RELEASE_TIME_S: f32 = 0.100;
+const HOLD_TIME_S: f32 = 0.050;
 
 pub(super) struct Gate {
     open_threshold: f32,
@@ -18,10 +23,10 @@ impl Gate {
         let sr = sample_rate as f32;
         Gate {
             open_threshold: db_to_gain(threshold_db),
-            close_threshold: db_to_gain(threshold_db - 6.0),
-            attack_coeff: (-1.0_f32 / (0.001 * sr)).exp(),
-            release_coeff: (-1.0_f32 / (0.100 * sr)).exp(),
-            hold_samples: (0.050 * sr) as u32,
+            close_threshold: db_to_gain(threshold_db - HYSTERESIS_DB),
+            attack_coeff: (-1.0_f32 / (ATTACK_TIME_S * sr)).exp(),
+            release_coeff: (-1.0_f32 / (RELEASE_TIME_S * sr)).exp(),
+            hold_samples: (HOLD_TIME_S * sr) as u32,
             envelope: 0.0,
             gain: 0.0,
             gate_open: false,
@@ -33,7 +38,7 @@ impl Gate {
     pub(super) fn update(&mut self, threshold_db: f32) {
         if threshold_db != self.last_threshold_db {
             self.open_threshold = db_to_gain(threshold_db);
-            self.close_threshold = db_to_gain(threshold_db - 6.0);
+            self.close_threshold = db_to_gain(threshold_db - HYSTERESIS_DB);
             self.last_threshold_db = threshold_db;
         }
     }

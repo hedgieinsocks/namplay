@@ -140,9 +140,6 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     let pedal_profile_path = path_from_settings(&settings, PEDAL_PATH);
     let amp_profile_path = path_from_settings(&settings, AMP_PATH);
 
-    // The engine reports a load for the profile restored from settings at startup
-    // too, and a preset carries its own explicit output gain; both are cases where
-    // auto-normalize must not clobber an output gain that was just set on purpose.
     let pedal_skip_normalize = Rc::new(Cell::new(pedal_profile_path.is_some()));
     let amp_skip_normalize = Rc::new(Cell::new(amp_profile_path.is_some()));
 
@@ -150,16 +147,20 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         input_device: path_from_settings(&settings, INPUT_DEVICE),
         output_device: path_from_settings(&settings, OUTPUT_DEVICE),
         buffer_size: settings.int(BUFFER_SIZE) as u32,
+        mute: settings.boolean(MUTE),
         gate_enabled: settings.boolean(GATE_ENABLED),
         gate_threshold_db: settings.double(GATE_THRESHOLD) as f32,
         pedal_profile_path: pedal_profile_path.clone(),
         pedal_in_gain_db: settings.double(PEDAL_INPUT) as f32,
         pedal_out_gain_db: settings.double(PEDAL_OUTPUT) as f32,
+        pedal_bypass: settings.boolean(PEDAL_BYPASS),
         amp_profile_path: amp_profile_path.clone(),
         amp_in_gain_db: settings.double(AMP_INPUT) as f32,
         amp_out_gain_db: settings.double(AMP_OUTPUT) as f32,
+        amp_bypass: settings.boolean(AMP_BYPASS),
         cab_path: path_from_settings(&settings, CAB_PATH),
         cab_level_db: settings.double(CAB_LEVEL) as f32,
+        cab_bypass: settings.boolean(CAB_BYPASS),
         eq_enabled: settings.boolean(EQ_ENABLED),
         eq_pos: EqPosition::from_setting(settings.string(EQ_POSITION).as_str()),
         eq_low_db: settings.double(EQ_LOW) as f32,
@@ -172,22 +173,10 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
             let engine = Rc::new(engine);
             setup_audio_window(&builder, &settings, &engine);
 
-            setup_toggle_button(&builder, "mute_button", {
-                let engine = Rc::clone(&engine);
-                move |v| engine.set_mute(v)
-            });
-            setup_toggle_button(&builder, "pedal_bypass_button", {
-                let engine = Rc::clone(&engine);
-                move |v| engine.set_pedal_bypass(v)
-            });
-            setup_toggle_button(&builder, "amp_bypass_button", {
-                let engine = Rc::clone(&engine);
-                move |v| engine.set_amp_bypass(v)
-            });
-            setup_toggle_button(&builder, "cab_bypass_button", {
-                let engine = Rc::clone(&engine);
-                move |v| engine.set_cab_bypass(v)
-            });
+            setup_toggle_button(&builder, &settings, "mute_button", MUTE);
+            setup_toggle_button(&builder, &settings, "pedal_bypass_button", PEDAL_BYPASS);
+            setup_toggle_button(&builder, &settings, "amp_bypass_button", AMP_BYPASS);
+            setup_toggle_button(&builder, &settings, "cab_bypass_button", CAB_BYPASS);
 
             setup_tray(
                 app,
@@ -291,10 +280,14 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                     INPUT_DEVICE => engine.set_input_device(path_from_settings(s, key)),
                     OUTPUT_DEVICE => engine.set_output_device(path_from_settings(s, key)),
                     BUFFER_SIZE => engine.set_buffer_size(s.int(key) as u32),
+                    MUTE => engine.set_mute(s.boolean(key)),
                     GATE_ENABLED => engine.set_gate_enabled(s.boolean(key)),
                     PEDAL_PATH => engine.load_pedal_profile(path_from_settings(s, key)),
+                    PEDAL_BYPASS => engine.set_pedal_bypass(s.boolean(key)),
                     AMP_PATH => engine.load_amp_profile(path_from_settings(s, key)),
+                    AMP_BYPASS => engine.set_amp_bypass(s.boolean(key)),
                     CAB_PATH => engine.load_cab(path_from_settings(s, key)),
+                    CAB_BYPASS => engine.set_cab_bypass(s.boolean(key)),
                     EQ_ENABLED => engine.set_eq_enabled(s.boolean(key)),
                     EQ_POSITION => {
                         engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
@@ -339,17 +332,21 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     }
 }
 
-fn setup_toggle_button(builder: &gtk4::Builder, id: &str, set: impl Fn(bool) + 'static) {
+fn setup_toggle_button(
+    builder: &gtk4::Builder,
+    settings: &gio::Settings,
+    id: &str,
+    key: &'static str,
+) {
     let btn: gtk4::ToggleButton = builder.object(id).expect(id);
-    btn.connect_toggled(move |btn| {
-        let active = btn.is_active();
-        btn.set_icon_name(if active {
+    btn.connect_toggled(|btn| {
+        btn.set_icon_name(if btn.is_active() {
             "audio-volume-muted-symbolic"
         } else {
             "audio-volume-high-symbolic"
         });
-        set(active);
     });
+    settings.bind(key, &btn, "active").build();
 }
 
 fn setup_tray(

@@ -29,6 +29,10 @@
       <default>false</default>
       <summary>Automatically normalize pedal and amp output on load</summary>
     </key>
+    <key name="mute" type="b">
+      <default>false</default>
+      <summary>Output muted</summary>
+    </key>
 
     <key name="input-device" type="s">
       <default>''</default>
@@ -68,6 +72,10 @@
       <default>0</default>
       <summary>Pedal profile output gain in dB</summary>
     </key>
+    <key name="pedal-bypass" type="b">
+      <default>false</default>
+      <summary>Pedal profile bypassed</summary>
+    </key>
 
     <key name="amp-path" type="s">
       <default>''</default>
@@ -83,6 +91,10 @@
       <default>0</default>
       <summary>Amp profile output gain in dB</summary>
     </key>
+    <key name="amp-bypass" type="b">
+      <default>false</default>
+      <summary>Amp profile bypassed</summary>
+    </key>
 
     <key name="cab-path" type="s">
       <default>''</default>
@@ -92,6 +104,10 @@
       <range min="-40" max="0"/>
       <default>-18</default>
       <summary>Impulse response output level in dB</summary>
+    </key>
+    <key name="cab-bypass" type="b">
+      <default>false</default>
+      <summary>Cabinet impulse response bypassed</summary>
     </key>
 
     <key name="eq-enabled" type="b">

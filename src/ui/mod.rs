@@ -267,7 +267,7 @@ pub fn setup_eq_position(builder: &gtk4::Builder, settings: &gio::Settings) {
     });
 }
 
-fn run_blocking<T: Send + 'static>(
+fn spawn_background_task<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
     on_done: impl FnOnce(T) + 'static,
 ) {
@@ -323,7 +323,7 @@ pub fn setup_preset_actions(
                         let yaml = yaml.clone();
                         let toast_overlay = toast_overlay.clone();
                         let path_for_log = path.clone();
-                        run_blocking(
+                        spawn_background_task(
                             move || std::fs::write(&path, yaml.as_bytes()),
                             move |result| match result {
                                 Ok(()) => {
@@ -376,7 +376,7 @@ pub fn setup_preset_actions(
                     if let Some(path) = file.path() {
                         debug!(target: "preset", "state=loading file={}", path.display());
                         let path_for_log = path.clone();
-                        run_blocking(
+                        spawn_background_task(
                             move || std::fs::read_to_string(&path),
                             move |result| {
                                 let content = match result {
@@ -410,8 +410,6 @@ pub fn setup_preset_actions(
                                     }
                                 };
                                 debug!(target: "preset", "state=loaded file={}", path_for_log.display());
-                                // A preset carries its own explicit output gain; don't let
-                                // auto-normalize clobber it once the profile finishes loading.
                                 pedal_skip_normalize.set(true);
                                 amp_skip_normalize.set(true);
                                 preset.apply(&settings);

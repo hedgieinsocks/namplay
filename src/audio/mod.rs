@@ -20,7 +20,7 @@ use nam_rs::Model;
 
 const MAX_BLOCK_SIZE: usize = 8192;
 
-use cab::CabConvolvers;
+use cab::CabConvolver;
 pub use eq::EqPosition;
 use eq::{EqChannel, EqCoeffs};
 use gate::Gate;
@@ -33,9 +33,6 @@ pub(super) fn db_to_gain(db: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
 
-/// Runs `load` on a background thread and sends the result over `tx`, logging
-/// the cleared/loading/loaded/error states and emitting an `EngineEvent::Warning`
-/// on failure. `on_clear` runs when `path` is `None` or `load` fails.
 pub(super) fn spawn_background_load<T: Send + 'static>(
     target: &'static str,
     tx: mpsc::Sender<Option<T>>,
@@ -90,16 +87,20 @@ pub struct InitialParams {
     pub input_device: Option<String>,
     pub output_device: Option<String>,
     pub buffer_size: u32,
+    pub mute: bool,
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
     pub pedal_profile_path: Option<String>,
     pub pedal_in_gain_db: f32,
     pub pedal_out_gain_db: f32,
+    pub pedal_bypass: bool,
     pub amp_profile_path: Option<String>,
     pub amp_in_gain_db: f32,
     pub amp_out_gain_db: f32,
+    pub amp_bypass: bool,
     pub cab_path: Option<String>,
     pub cab_level_db: f32,
+    pub cab_bypass: bool,
     pub eq_enabled: bool,
     pub eq_pos: EqPosition,
     pub eq_low_db: f32,
@@ -117,7 +118,7 @@ pub struct AudioEngine {
     amp_profile_tx: mpsc::Sender<Option<Model>>,
     pub amp_loudness: Arc<Mutex<Option<f32>>>,
     pub amp_bypass: Arc<AtomicBool>,
-    cab_tx: mpsc::Sender<Option<CabConvolvers>>,
+    cab_tx: mpsc::Sender<Option<CabConvolver>>,
     pub cab_bypass: Arc<AtomicBool>,
     params: Arc<Mutex<Params>>,
     client: jack::AsyncClient<Notifications, NamProcessor>,
@@ -160,15 +161,16 @@ impl AudioEngine {
 
         let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
         let pedal_loudness = Arc::new(Mutex::new(None::<f32>));
-        let pedal_bypass = Arc::new(AtomicBool::new(false));
+        let pedal_bypass = Arc::new(AtomicBool::new(params.pedal_bypass));
         let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
         let amp_loudness = Arc::new(Mutex::new(None::<f32>));
-        let amp_bypass = Arc::new(AtomicBool::new(false));
-        let cab_bypass = Arc::new(AtomicBool::new(false));
-        let (cab_tx, cab_rx) = mpsc::channel::<Option<CabConvolvers>>();
+        let amp_bypass = Arc::new(AtomicBool::new(params.amp_bypass));
+        let cab_bypass = Arc::new(AtomicBool::new(params.cab_bypass));
+        let (cab_tx, cab_rx) = mpsc::channel::<Option<CabConvolver>>();
 
-        let mute = Arc::new(AtomicBool::new(false));
+        let mute = Arc::new(AtomicBool::new(params.mute));
 
+        debug!(target: "mute", "state={}", if params.mute { "on" } else { "off" });
         debug!(
             target: "gate",
             "state={} threshold={}dB",
@@ -177,15 +179,24 @@ impl AudioEngine {
         );
         debug!(
             target: "pedal",
-            "in={}dB out={}dB",
-            params.pedal_in_gain_db, params.pedal_out_gain_db
+            "in={}dB out={}dB bypass={}",
+            params.pedal_in_gain_db,
+            params.pedal_out_gain_db,
+            if params.pedal_bypass { "on" } else { "off" }
         );
         debug!(
             target: "amp",
-            "in={}dB out={}dB",
-            params.amp_in_gain_db, params.amp_out_gain_db
+            "in={}dB out={}dB bypass={}",
+            params.amp_in_gain_db,
+            params.amp_out_gain_db,
+            if params.amp_bypass { "on" } else { "off" }
         );
-        debug!(target: "cab", "level={}dB", params.cab_level_db);
+        debug!(
+            target: "cab",
+            "level={}dB bypass={}",
+            params.cab_level_db,
+            if params.cab_bypass { "on" } else { "off" }
+        );
         debug!(
             target: "eq",
             "state={} position={} low={}dB mid={}dB high={}dB hp={}Hz lp={}Hz",
@@ -247,14 +258,12 @@ impl AudioEngine {
             current_amp_profile: None,
             amp_bypass: Arc::clone(&amp_bypass),
             cab_rx,
-            current_cab_l: None,
-            current_cab_r: None,
+            current_cab: None,
             cab_bypass: Arc::clone(&cab_bypass),
             params: Arc::clone(&shared_params),
             last_params: initial_params,
             eq_coeffs,
-            eq_l: EqChannel::new(),
-            eq_r: EqChannel::new(),
+            eq: EqChannel::new(),
             conv_buf: vec![0.0f32; MAX_BLOCK_SIZE],
             in_port,
             out_port_1,

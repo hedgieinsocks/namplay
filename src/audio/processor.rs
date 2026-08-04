@@ -5,7 +5,7 @@ use fft_convolver::FFTConvolver;
 use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
 use nam_rs::Model;
 
-use super::cab::CabConvolvers;
+use super::cab::CabConvolver;
 use super::eq::{EqChannel, EqCoeffs};
 use super::gate::Gate;
 use super::EqPosition;
@@ -37,15 +37,13 @@ pub(super) struct NamProcessor {
     pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_amp_profile: Option<Model>,
     pub(super) amp_bypass: Arc<AtomicBool>,
-    pub(super) cab_rx: mpsc::Receiver<Option<CabConvolvers>>,
-    pub(super) current_cab_l: Option<FFTConvolver<f32>>,
-    pub(super) current_cab_r: Option<FFTConvolver<f32>>,
+    pub(super) cab_rx: mpsc::Receiver<Option<CabConvolver>>,
+    pub(super) current_cab: Option<FFTConvolver<f32>>,
     pub(super) cab_bypass: Arc<AtomicBool>,
     pub(super) params: Arc<Mutex<Params>>,
     pub(super) last_params: Params,
     pub(super) eq_coeffs: EqCoeffs,
-    pub(super) eq_l: EqChannel,
-    pub(super) eq_r: EqChannel,
+    pub(super) eq: EqChannel,
     pub(super) conv_buf: Vec<f32>,
     pub(super) in_port: jack::Port<AudioIn>,
     pub(super) out_port_1: jack::Port<AudioOut>,
@@ -69,16 +67,7 @@ impl ProcessHandler for NamProcessor {
             self.current_amp_profile = new_profile;
         }
         while let Ok(new_cab) = self.cab_rx.try_recv() {
-            match new_cab {
-                Some((l, r)) => {
-                    self.current_cab_l = Some(l);
-                    self.current_cab_r = r;
-                }
-                None => {
-                    self.current_cab_l = None;
-                    self.current_cab_r = None;
-                }
-            }
+            self.current_cab = new_cab;
         }
 
         let muted = self.mute.load(Ordering::Relaxed);
@@ -147,7 +136,7 @@ impl ProcessHandler for NamProcessor {
         }
 
         if p.eq_enabled && p.eq_pos == EqPosition::PrePedal {
-            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
+            self.eq.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !pedal_bypass {
@@ -159,7 +148,7 @@ impl ProcessHandler for NamProcessor {
         }
 
         if p.eq_enabled && p.eq_pos == EqPosition::PreAmp {
-            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
+            self.eq.process_buffer(out_l, &self.eq_coeffs);
         }
 
         if !amp_bypass {
@@ -171,31 +160,20 @@ impl ProcessHandler for NamProcessor {
         }
 
         let n = out_l.len().min(self.conv_buf.len());
-        let mut stereo_cab = false;
 
         if !cab_bypass {
-            if let Some(cab_l) = &mut self.current_cab_l {
+            if let Some(cab) = &mut self.current_cab {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
-                let _ = cab_l.process(&self.conv_buf[..n], &mut out_l[..n]);
+                let _ = cab.process(&self.conv_buf[..n], &mut out_l[..n]);
                 apply_gain(&mut out_l[..n], p.cab_level);
-                if let Some(cab_r) = &mut self.current_cab_r {
-                    let _ = cab_r.process(&self.conv_buf[..n], &mut out_r[..n]);
-                    apply_gain(&mut out_r[..n], p.cab_level);
-                    stereo_cab = true;
-                }
             }
         }
 
         if p.eq_enabled && p.eq_pos == EqPosition::PostCab {
-            self.eq_l.process_buffer(out_l, &self.eq_coeffs);
-            if stereo_cab {
-                self.eq_r.process_buffer(out_r, &self.eq_coeffs);
-            }
+            self.eq.process_buffer(out_l, &self.eq_coeffs);
         }
 
-        if !stereo_cab {
-            out_r.copy_from_slice(out_l);
-        }
+        out_r.copy_from_slice(out_l);
 
         Control::Continue
     }

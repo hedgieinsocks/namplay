@@ -1,36 +1,29 @@
 BIN    := namplay
 APP_ID := io.github.hedgieinsocks.Namplay
-PREFIX ?= $(HOME)/.local
 
-ICON_SRC    := data/$(APP_ID).svg
-ICON_DST    := $(PREFIX)/share/icons/hicolor/128x128/apps/$(APP_ID).svg
-DESKTOP_SRC := data/$(APP_ID).desktop
-DESKTOP_DST := $(PREFIX)/share/applications/$(APP_ID).desktop
-SCHEMA_SRC  := data/$(APP_ID).gschema.xml
-SCHEMA_DST  := $(PREFIX)/share/glib-2.0/schemas/$(APP_ID).gschema.xml
-SCHEMA_DEV  := target/schemas
-MANIFEST    := $(APP_ID).yaml
+SCHEMA_DEV := target/schemas
+MANIFEST   := $(APP_ID).yaml
 
-.PHONY: all help check update build run release install uninstall flatpak clean
+.PHONY: all help lint update build run flatpak clean
 
 all: help
 
 help:
-	@echo "check      run cargo check"
-	@echo "update     update cargo dependencies"
+	@echo "lint       run cargo clippy"
+	@echo "update     update cargo dependencies and regenerate flatpak sources"
 	@echo "build      compile debug binary"
-	@echo "run        compile and run with dev schema"
-	@echo "release    compile optimized binary"
-	@echo "install    install to $(PREFIX)"
-	@echo "uninstall  remove installed files"
+	@echo "run        compile debug binary and run with dev schema"
 	@echo "flatpak    build distributable flatpak bundle"
 	@echo "clean      remove build artifacts"
 
-check:
-	cargo check
+lint:
+	cargo clippy --all-targets -- -D warnings -D clippy::all
 
 update:
+	@test -f flatpak-cargo-generator.py || \
+		curl -sLO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 	cargo update
+	python3 flatpak-cargo-generator.py Cargo.lock -o cargo-sources.json
 
 build:
 	cargo build
@@ -40,31 +33,10 @@ run: build
 	glib-compile-schemas data --targetdir=$(SCHEMA_DEV)
 	GSETTINGS_SCHEMA_DIR=$(SCHEMA_DEV) RUST_LOG=debug ./target/debug/$(BIN)
 
-release:
-	cargo build --release
-
-install: release
-	install -Dm755 target/release/$(BIN)  $(PREFIX)/bin/$(BIN)
-	install -Dm644 $(ICON_SRC)            $(ICON_DST)
-	sed "s|Exec=$(BIN)|Exec=$(PREFIX)/bin/$(BIN)|" $(DESKTOP_SRC) | install -Dm644 /dev/stdin $(DESKTOP_DST)
-	install -Dm644 $(SCHEMA_SRC)          $(SCHEMA_DST)
-	glib-compile-schemas $(PREFIX)/share/glib-2.0/schemas
-	gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor
-	update-desktop-database $(PREFIX)/share/applications
-
-uninstall:
-	rm -f $(PREFIX)/bin/$(BIN)
-	rm -f $(ICON_DST)
-	rm -f $(DESKTOP_DST)
-	rm -f $(SCHEMA_DST)
-	glib-compile-schemas $(PREFIX)/share/glib-2.0/schemas
-	gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor
-	update-desktop-database $(PREFIX)/share/applications
-
 flatpak:
 	flatpak-builder --repo=repo --force-clean build-dir $(MANIFEST)
 	flatpak build-bundle repo $(BIN).flatpak $(APP_ID)
 
 clean:
 	cargo clean
-	rm -rf $(SCHEMA_DEV) build-dir repo $(BIN).flatpak
+	rm -rf $(SCHEMA_DEV) build-dir repo target $(BIN).flatpak

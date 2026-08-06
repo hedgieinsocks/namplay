@@ -2,3 +2,4 @@
 /build-dir/
 /repo/
 *.flatpak
+/flatpak-cargo-generator.py

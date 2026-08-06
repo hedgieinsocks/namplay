@@ -526,12 +526,12 @@ impl AudioEngine {
     }
 
     pub fn set_eq_hp_freq(&self, hz: f32) {
-        debug!(target: "eq", "high-pass={hz}Hz");
+        debug!(target: "eq", "hp={hz}Hz");
         self.params.lock().unwrap().eq_hp_freq = hz;
     }
 
     pub fn set_eq_lp_freq(&self, hz: f32) {
-        debug!(target: "eq", "low-pass={hz}Hz");
+        debug!(target: "eq", "lp={hz}Hz");
         self.params.lock().unwrap().eq_lp_freq = hz;
     }
 }

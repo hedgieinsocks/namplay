@@ -26,11 +26,8 @@ modules:
         tag: v0.22.2
   - name: namplay
     buildsystem: simple
-    build-options:
-      build-args:
-        - --share=network
     build-commands:
-      - cargo build --release
+      - cargo build --release --offline
       - install -Dm755 target/release/namplay /app/bin/namplay
       - install -Dm644 data/io.github.hedgieinsocks.Namplay.desktop /app/share/applications/io.github.hedgieinsocks.Namplay.desktop
       - install -Dm644 data/io.github.hedgieinsocks.Namplay.svg /app/share/icons/hicolor/128x128/apps/io.github.hedgieinsocks.Namplay.svg
@@ -39,3 +36,4 @@ modules:
     sources:
       - type: dir
         path: .
+      - cargo-sources.json

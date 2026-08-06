@@ -53,7 +53,9 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
     },
 ];
 
-const SLIDERS: &[(&str, fn(&AudioEngine, f32))] = &[
+type SliderSetter = fn(&AudioEngine, f32);
+
+const SLIDERS: &[(&str, SliderSetter)] = &[
     (GATE_THRESHOLD, AudioEngine::set_gate_threshold_db),
     (EQ_HP, AudioEngine::set_eq_hp_freq),
     (EQ_LOW, AudioEngine::set_eq_low_db),

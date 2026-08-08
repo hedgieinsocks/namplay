@@ -118,6 +118,7 @@
       <choices>
         <choice value="pre-pedal"/>
         <choice value="pre-amp"/>
+        <choice value="post-amp"/>
         <choice value="post-cab"/>
       </choices>
       <default>'pre-amp'</default>

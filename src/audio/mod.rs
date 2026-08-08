@@ -114,12 +114,9 @@ pub struct AudioEngine {
     pub mute: Arc<AtomicBool>,
     pedal_profile_tx: mpsc::Sender<Option<Model>>,
     pub pedal_loudness: Arc<Mutex<Option<f32>>>,
-    pub pedal_bypass: Arc<AtomicBool>,
     amp_profile_tx: mpsc::Sender<Option<Model>>,
     pub amp_loudness: Arc<Mutex<Option<f32>>>,
-    pub amp_bypass: Arc<AtomicBool>,
     cab_tx: mpsc::Sender<Option<CabConvolver>>,
-    pub cab_bypass: Arc<AtomicBool>,
     params: Arc<Mutex<Params>>,
     client: jack::AsyncClient<Notifications, NamProcessor>,
     sample_rate: u32,
@@ -161,11 +158,8 @@ impl AudioEngine {
 
         let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
         let pedal_loudness = Arc::new(Mutex::new(None::<f32>));
-        let pedal_bypass = Arc::new(AtomicBool::new(params.pedal_bypass));
         let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
         let amp_loudness = Arc::new(Mutex::new(None::<f32>));
-        let amp_bypass = Arc::new(AtomicBool::new(params.amp_bypass));
-        let cab_bypass = Arc::new(AtomicBool::new(params.cab_bypass));
         let (cab_tx, cab_rx) = mpsc::channel::<Option<CabConvolver>>();
 
         let mute = Arc::new(AtomicBool::new(params.mute));
@@ -214,9 +208,12 @@ impl AudioEngine {
             gate_threshold_db: params.gate_threshold_db,
             pedal_in_gain: db_to_gain(params.pedal_in_gain_db),
             pedal_out_gain: db_to_gain(params.pedal_out_gain_db),
+            pedal_bypass: params.pedal_bypass,
             amp_in_gain: db_to_gain(params.amp_in_gain_db),
             amp_out_gain: db_to_gain(params.amp_out_gain_db),
+            amp_bypass: params.amp_bypass,
             cab_level: db_to_gain(params.cab_level_db),
+            cab_bypass: params.cab_bypass,
             eq_enabled: params.eq_enabled,
             eq_pos: params.eq_pos,
             eq_low_db: params.eq_low_db,
@@ -253,13 +250,10 @@ impl AudioEngine {
             gate: Gate::new(params.gate_threshold_db, sample_rate),
             pedal_profile_rx,
             current_pedal_profile: None,
-            pedal_bypass: Arc::clone(&pedal_bypass),
             amp_profile_rx,
             current_amp_profile: None,
-            amp_bypass: Arc::clone(&amp_bypass),
             cab_rx,
             current_cab: None,
-            cab_bypass: Arc::clone(&cab_bypass),
             params: Arc::clone(&shared_params),
             last_params: initial_params,
             eq_coeffs,
@@ -280,12 +274,9 @@ impl AudioEngine {
             mute,
             pedal_profile_tx,
             pedal_loudness,
-            pedal_bypass,
             amp_profile_tx,
             amp_loudness,
-            amp_bypass,
             cab_tx,
-            cab_bypass,
             params: shared_params,
             client: active_client,
             sample_rate,
@@ -451,7 +442,7 @@ impl AudioEngine {
 
     pub fn set_pedal_bypass(&self, bypassed: bool) {
         debug!(target: "pedal", "bypass={}", if bypassed { "on" } else { "off" });
-        self.pedal_bypass.store(bypassed, Ordering::Relaxed);
+        self.params.lock().unwrap().pedal_bypass = bypassed;
     }
 
     pub fn load_amp_profile(&self, path: Option<String>) {
@@ -477,7 +468,7 @@ impl AudioEngine {
 
     pub fn set_amp_bypass(&self, bypassed: bool) {
         debug!(target: "amp", "bypass={}", if bypassed { "on" } else { "off" });
-        self.amp_bypass.store(bypassed, Ordering::Relaxed);
+        self.params.lock().unwrap().amp_bypass = bypassed;
     }
 
     pub fn load_cab(&self, path: Option<String>) {
@@ -497,7 +488,7 @@ impl AudioEngine {
 
     pub fn set_cab_bypass(&self, bypassed: bool) {
         debug!(target: "cab", "bypass={}", if bypassed { "on" } else { "off" });
-        self.cab_bypass.store(bypassed, Ordering::Relaxed);
+        self.params.lock().unwrap().cab_bypass = bypassed;
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {

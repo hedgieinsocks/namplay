@@ -300,7 +300,7 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         }
         Err(e) => {
             error!(target: "audio", "state=unavailable reason={e}");
-            show_persistent_toast(&toast_overlay, "Audio unavailable");
+            show_persistent_toast(&toast_overlay, "Audio: unavailable");
         }
     }
 

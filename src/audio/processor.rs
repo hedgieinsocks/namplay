@@ -16,9 +16,12 @@ pub(crate) struct Params {
     pub gate_threshold_db: f32,
     pub pedal_in_gain: f32,
     pub pedal_out_gain: f32,
+    pub pedal_bypass: bool,
     pub amp_in_gain: f32,
     pub amp_out_gain: f32,
+    pub amp_bypass: bool,
     pub cab_level: f32,
+    pub cab_bypass: bool,
     pub eq_enabled: bool,
     pub eq_pos: EqPosition,
     pub eq_low_db: f32,
@@ -33,13 +36,10 @@ pub(super) struct NamProcessor {
     pub(super) gate: Gate,
     pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_pedal_profile: Option<Model>,
-    pub(super) pedal_bypass: Arc<AtomicBool>,
     pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
     pub(super) current_amp_profile: Option<Model>,
-    pub(super) amp_bypass: Arc<AtomicBool>,
     pub(super) cab_rx: mpsc::Receiver<Option<CabConvolver>>,
     pub(super) current_cab: Option<FFTConvolver<f32>>,
-    pub(super) cab_bypass: Arc<AtomicBool>,
     pub(super) params: Arc<Mutex<Params>>,
     pub(super) last_params: Params,
     pub(super) eq_coeffs: EqCoeffs,
@@ -119,10 +119,6 @@ impl ProcessHandler for NamProcessor {
             );
         }
 
-        let pedal_bypass = self.pedal_bypass.load(Ordering::Relaxed);
-        let amp_bypass = self.amp_bypass.load(Ordering::Relaxed);
-        let cab_bypass = self.cab_bypass.load(Ordering::Relaxed);
-
         let input = self.in_port.as_slice(ps);
         let out_l = self.out_port_1.as_mut_slice(ps);
         let out_r = self.out_port_2.as_mut_slice(ps);
@@ -139,7 +135,7 @@ impl ProcessHandler for NamProcessor {
             self.eq.process_buffer(out_l, &self.eq_coeffs);
         }
 
-        if !pedal_bypass {
+        if !p.pedal_bypass {
             if let Some(pedal) = &mut self.current_pedal_profile {
                 apply_gain(out_l, p.pedal_in_gain);
                 pedal.process_buffer(out_l);
@@ -151,7 +147,7 @@ impl ProcessHandler for NamProcessor {
             self.eq.process_buffer(out_l, &self.eq_coeffs);
         }
 
-        if !amp_bypass {
+        if !p.amp_bypass {
             if let Some(amp) = &mut self.current_amp_profile {
                 apply_gain(out_l, p.amp_in_gain);
                 amp.process_buffer(out_l);
@@ -159,9 +155,13 @@ impl ProcessHandler for NamProcessor {
             }
         }
 
+        if p.eq_enabled && p.eq_pos == EqPosition::PostAmp {
+            self.eq.process_buffer(out_l, &self.eq_coeffs);
+        }
+
         let n = out_l.len().min(self.conv_buf.len());
 
-        if !cab_bypass {
+        if !p.cab_bypass {
             if let Some(cab) = &mut self.current_cab {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
                 let _ = cab.process(&self.conv_buf[..n], &mut out_l[..n]);

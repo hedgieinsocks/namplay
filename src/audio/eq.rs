@@ -11,14 +11,16 @@ const EQ_MID_Q_BOOST: f32 = 0.7;
 pub enum EqPosition {
     PrePedal = 0,
     PreAmp = 1,
-    PostCab = 2,
+    PostAmp = 2,
+    PostCab = 3,
 }
 
 impl EqPosition {
     pub fn from_index(index: u32) -> Self {
         match index {
             0 => Self::PrePedal,
-            2 => Self::PostCab,
+            2 => Self::PostAmp,
+            3 => Self::PostCab,
             _ => Self::PreAmp,
         }
     }
@@ -26,6 +28,7 @@ impl EqPosition {
     pub fn from_setting(setting: &str) -> Self {
         match setting {
             "pre-pedal" => Self::PrePedal,
+            "post-amp" => Self::PostAmp,
             "post-cab" => Self::PostCab,
             _ => Self::PreAmp,
         }
@@ -39,6 +42,7 @@ impl EqPosition {
         match self {
             Self::PrePedal => "pre-pedal",
             Self::PreAmp => "pre-amp",
+            Self::PostAmp => "post-amp",
             Self::PostCab => "post-cab",
         }
     }

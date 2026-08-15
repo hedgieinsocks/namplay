@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, mpsc, Arc, Mutex};
 
 use fft_convolver::FFTConvolver;
-use jack::{AudioIn, AudioOut, Client, Control, ProcessHandler, ProcessScope};
+use jack::{AudioIn, AudioOut, Client, Control, NotificationHandler, ProcessHandler, ProcessScope};
+use log::warn;
 use nam_rs::Model;
 
 use super::cab::CabConvolver;
@@ -10,17 +11,27 @@ use super::eq::{EqChannel, EqCoeffs};
 use super::gate::Gate;
 use super::EqPosition;
 
+pub(super) struct Notifications;
+
+impl NotificationHandler for Notifications {
+    fn xrun(&mut self, _: &Client) -> Control {
+        warn!(target: "jack", "xrun (buffer under/overrun)");
+        Control::Continue
+    }
+}
+
 #[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Params {
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
-    pub pedal_in_gain: f32,
-    pub pedal_out_gain: f32,
+    pub pedal_input_gain: f32,
+    pub pedal_output_gain: f32,
     pub pedal_bypass: bool,
-    pub amp_in_gain: f32,
-    pub amp_out_gain: f32,
+    pub amp_input_gain: f32,
+    pub amp_output_gain: f32,
     pub amp_bypass: bool,
-    pub cab_level: f32,
+    pub cab_level_gain: f32,
     pub cab_bypass: bool,
     pub eq_enabled: bool,
     pub eq_pos: EqPosition,
@@ -34,10 +45,10 @@ pub(crate) struct Params {
 pub(super) struct NamProcessor {
     pub(super) mute: Arc<AtomicBool>,
     pub(super) gate: Gate,
-    pub(super) pedal_profile_rx: mpsc::Receiver<Option<Model>>,
-    pub(super) current_pedal_profile: Option<Model>,
-    pub(super) amp_profile_rx: mpsc::Receiver<Option<Model>>,
-    pub(super) current_amp_profile: Option<Model>,
+    pub(super) pedal_capture_rx: mpsc::Receiver<Option<Model>>,
+    pub(super) current_pedal_capture: Option<Model>,
+    pub(super) amp_capture_rx: mpsc::Receiver<Option<Model>>,
+    pub(super) current_amp_capture: Option<Model>,
     pub(super) cab_rx: mpsc::Receiver<Option<CabConvolver>>,
     pub(super) current_cab: Option<FFTConvolver<f32>>,
     pub(super) params: Arc<Mutex<Params>>,
@@ -60,11 +71,13 @@ fn apply_gain(buf: &mut [f32], gain: f32) {
 
 impl ProcessHandler for NamProcessor {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
-        while let Ok(new_profile) = self.pedal_profile_rx.try_recv() {
-            self.current_pedal_profile = new_profile;
+        const TUNER_SAMPLE_BUFFER_MAX: usize = super::tuner::SAMPLE_BUFFER_MAX;
+
+        while let Ok(new_capture) = self.pedal_capture_rx.try_recv() {
+            self.current_pedal_capture = new_capture;
         }
-        while let Ok(new_profile) = self.amp_profile_rx.try_recv() {
-            self.current_amp_profile = new_profile;
+        while let Ok(new_capture) = self.amp_capture_rx.try_recv() {
+            self.current_amp_capture = new_capture;
         }
         while let Ok(new_cab) = self.cab_rx.try_recv() {
             self.current_cab = new_cab;
@@ -76,9 +89,8 @@ impl ProcessHandler for NamProcessor {
             let input = self.in_port.as_slice(ps);
             if let Ok(mut guard) = self.tuner_samples.try_lock() {
                 guard.extend(input.iter().copied());
-                const MAX: usize = super::tuner::SAMPLE_BUFFER_MAX;
-                if guard.len() > MAX {
-                    let excess = guard.len() - MAX;
+                if guard.len() > TUNER_SAMPLE_BUFFER_MAX {
+                    let excess = guard.len() - TUNER_SAMPLE_BUFFER_MAX;
                     guard.drain(..excess);
                 }
             }
@@ -136,10 +148,10 @@ impl ProcessHandler for NamProcessor {
         }
 
         if !p.pedal_bypass {
-            if let Some(pedal) = &mut self.current_pedal_profile {
-                apply_gain(out_l, p.pedal_in_gain);
+            if let Some(pedal) = &mut self.current_pedal_capture {
+                apply_gain(out_l, p.pedal_input_gain);
                 pedal.process_buffer(out_l);
-                apply_gain(out_l, p.pedal_out_gain);
+                apply_gain(out_l, p.pedal_output_gain);
             }
         }
 
@@ -148,10 +160,10 @@ impl ProcessHandler for NamProcessor {
         }
 
         if !p.amp_bypass {
-            if let Some(amp) = &mut self.current_amp_profile {
-                apply_gain(out_l, p.amp_in_gain);
+            if let Some(amp) = &mut self.current_amp_capture {
+                apply_gain(out_l, p.amp_input_gain);
                 amp.process_buffer(out_l);
-                apply_gain(out_l, p.amp_out_gain);
+                apply_gain(out_l, p.amp_output_gain);
             }
         }
 
@@ -165,7 +177,7 @@ impl ProcessHandler for NamProcessor {
             if let Some(cab) = &mut self.current_cab {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
                 let _ = cab.process(&self.conv_buf[..n], &mut out_l[..n]);
-                apply_gain(&mut out_l[..n], p.cab_level);
+                apply_gain(&mut out_l[..n], p.cab_level_gain);
             }
         }
 

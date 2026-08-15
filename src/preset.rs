@@ -2,7 +2,11 @@ use gio::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::EqPosition;
-use crate::keys::*;
+use crate::keys::{
+    AMP_BYPASS, AMP_INPUT, AMP_OUTPUT, AMP_PATH, CAB_BYPASS, CAB_LEVEL, CAB_PATH, EQ_ENABLED,
+    EQ_HIGH, EQ_HP, EQ_LOW, EQ_LP, EQ_MID, EQ_POSITION, GATE_ENABLED, GATE_THRESHOLD, MUTE,
+    PEDAL_BYPASS, PEDAL_INPUT, PEDAL_OUTPUT, PEDAL_PATH,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct PresetGate {
@@ -22,7 +26,7 @@ pub struct PresetEq {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PresetProfile {
+pub struct PresetCapture {
     pub file: String,
     pub input: f64,
     pub output: f64,
@@ -41,8 +45,8 @@ pub struct Preset {
     pub mute: bool,
     pub gate: PresetGate,
     pub eq: PresetEq,
-    pub pedal: PresetProfile,
-    pub amp: PresetProfile,
+    pub pedal: PresetCapture,
+    pub amp: PresetCapture,
     pub cab: PresetCab,
 }
 
@@ -67,13 +71,13 @@ impl Preset {
                 high: round1(settings.double(EQ_HIGH)),
                 lp: settings.double(EQ_LP).round() as u32,
             },
-            pedal: PresetProfile {
+            pedal: PresetCapture {
                 file: settings.string(PEDAL_PATH).to_string(),
                 input: round1(settings.double(PEDAL_INPUT)),
                 output: round1(settings.double(PEDAL_OUTPUT)),
                 bypass: settings.boolean(PEDAL_BYPASS),
             },
-            amp: PresetProfile {
+            amp: PresetCapture {
                 file: settings.string(AMP_PATH).to_string(),
                 input: round1(settings.double(AMP_INPUT)),
                 output: round1(settings.double(AMP_OUTPUT)),
@@ -96,11 +100,11 @@ impl Preset {
             EQ_POSITION,
             EqPosition::from_setting(&self.eq.position).setting(),
         );
-        let _ = settings.set_double(EQ_HP, self.eq.hp as f64);
+        let _ = settings.set_double(EQ_HP, f64::from(self.eq.hp));
         let _ = settings.set_double(EQ_LOW, self.eq.low);
         let _ = settings.set_double(EQ_MID, self.eq.mid);
         let _ = settings.set_double(EQ_HIGH, self.eq.high);
-        let _ = settings.set_double(EQ_LP, self.eq.lp as f64);
+        let _ = settings.set_double(EQ_LP, f64::from(self.eq.lp));
         let _ = settings.set_string(PEDAL_PATH, &self.pedal.file);
         let _ = settings.set_double(PEDAL_INPUT, self.pedal.input);
         let _ = settings.set_double(PEDAL_OUTPUT, self.pedal.output);

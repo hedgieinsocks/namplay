@@ -62,8 +62,7 @@ pub(super) fn spawn(
                         POWER_THRESHOLD,
                         CLARITY_THRESHOLD,
                     )
-                    .map(|p| p.frequency)
-                    .unwrap_or(0.0);
+                    .map_or(0.0, |p| p.frequency);
 
                 let _ = hz_tx.unbounded_send(detected);
             }
@@ -72,6 +71,10 @@ pub(super) fn spawn(
 }
 
 pub(crate) fn hz_to_note(hz: f32) -> Option<(String, f32)> {
+    const NAMES: &[&str] = &[
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+
     if !(20.0..=8000.0).contains(&hz) {
         return None;
     }
@@ -82,9 +85,6 @@ pub(crate) fn hz_to_note(hz: f32) -> Option<(String, f32)> {
     if !(21..=108).contains(&midi_int) {
         return None;
     }
-    const NAMES: &[&str] = &[
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-    ];
     let octave = (midi_int / 12) - 1;
     let name = format!("{}{}", NAMES[(midi_int % 12) as usize], octave);
     Some((name, cents))

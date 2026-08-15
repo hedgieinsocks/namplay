@@ -7,12 +7,12 @@ use nam_rs::{Model, NamModel};
 use super::EngineEvent;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ProfileKind {
+pub enum CaptureKind {
     Pedal,
     Amp,
 }
 
-impl ProfileKind {
+impl CaptureKind {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Pedal => "Pedal",
@@ -29,7 +29,7 @@ impl ProfileKind {
 }
 
 pub(super) fn load(
-    kind: ProfileKind,
+    kind: CaptureKind,
     tx: mpsc::Sender<Option<Model>>,
     path: Option<String>,
     sample_rate: u32,
@@ -53,7 +53,7 @@ pub(super) fn load(
                         "model_sample_rate={model_sr}Hz jack_sample_rate={sample_rate}Hz"
                     );
                     let detail = format!(
-                        "NAM profile sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz"
+                        "NAM capture sample rate {model_sr}Hz != JACK sample rate {sample_rate}Hz"
                     );
                     let _ = event_tx_for_load
                         .unbounded_send(EngineEvent::Warning(format!("{label}: {detail}")));
@@ -61,13 +61,13 @@ pub(super) fn load(
                 let loudness = nm.loudness();
                 *loudness_for_load.lock().unwrap() = loudness;
                 if loudness.is_some() {
-                    let _ = event_tx_for_load.unbounded_send(EngineEvent::ProfileLoaded(kind));
+                    let _ = event_tx_for_load.unbounded_send(EngineEvent::CaptureLoaded(kind));
                 }
                 Model::from_nam(&nm).ok()
             })
         },
         move || *loudness_out.lock().unwrap() = None,
-        move |p| format!("{label}: failed to load NAM profile: {p}"),
+        move |p| format!("{label}: failed to load NAM capture: {p}"),
         event_tx,
     );
 }

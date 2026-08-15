@@ -24,9 +24,9 @@ use cab::CabConvolver;
 pub use eq::EqPosition;
 use eq::{EqChannel, EqCoeffs};
 use gate::Gate;
-pub use nam::ProfileKind;
-use processor::NamProcessor;
+pub use nam::CaptureKind;
 pub(crate) use processor::Params;
+use processor::{NamProcessor, Notifications};
 pub(crate) use tuner::hz_to_note;
 
 pub(super) fn db_to_gain(db: f32) -> f32 {
@@ -69,20 +69,12 @@ pub(super) fn spawn_background_load<T: Send + 'static>(
         .expect("background load thread spawn failed");
 }
 
-struct Notifications;
-
-impl jack::NotificationHandler for Notifications {
-    fn xrun(&mut self, _: &Client) -> jack::Control {
-        warn!(target: "jack", "xrun (buffer under/overrun)");
-        jack::Control::Continue
-    }
-}
-
 pub enum EngineEvent {
     Warning(String),
-    ProfileLoaded(ProfileKind),
+    CaptureLoaded(CaptureKind),
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct InitialParams {
     pub input_device: Option<String>,
     pub output_device: Option<String>,
@@ -90,13 +82,13 @@ pub struct InitialParams {
     pub mute: bool,
     pub gate_enabled: bool,
     pub gate_threshold_db: f32,
-    pub pedal_profile_path: Option<String>,
-    pub pedal_in_gain_db: f32,
-    pub pedal_out_gain_db: f32,
+    pub pedal_capture_path: Option<String>,
+    pub pedal_input_db: f32,
+    pub pedal_output_db: f32,
     pub pedal_bypass: bool,
-    pub amp_profile_path: Option<String>,
-    pub amp_in_gain_db: f32,
-    pub amp_out_gain_db: f32,
+    pub amp_capture_path: Option<String>,
+    pub amp_input_db: f32,
+    pub amp_output_db: f32,
     pub amp_bypass: bool,
     pub cab_path: Option<String>,
     pub cab_level_db: f32,
@@ -112,9 +104,9 @@ pub struct InitialParams {
 
 pub struct AudioEngine {
     pub mute: Arc<AtomicBool>,
-    pedal_profile_tx: mpsc::Sender<Option<Model>>,
+    pedal_capture_tx: mpsc::Sender<Option<Model>>,
     pub pedal_loudness: Arc<Mutex<Option<f32>>>,
-    amp_profile_tx: mpsc::Sender<Option<Model>>,
+    amp_capture_tx: mpsc::Sender<Option<Model>>,
     pub amp_loudness: Arc<Mutex<Option<f32>>>,
     cab_tx: mpsc::Sender<Option<CabConvolver>>,
     params: Arc<Mutex<Params>>,
@@ -128,6 +120,7 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
+    #[allow(clippy::too_many_lines)]
     pub fn new(params: InitialParams) -> Result<Self, String> {
         let (client, _status) = Client::new("namplay", ClientOptions::NO_START_SERVER)
             .map_err(|e| format!("JACK connection failed: {e}"))?;
@@ -156,9 +149,9 @@ impl AudioEngine {
             .register_port("out_2", AudioOut::default())
             .map_err(|e| format!("register out_2 port: {e}"))?;
 
-        let (pedal_profile_tx, pedal_profile_rx) = mpsc::channel();
+        let (pedal_capture_tx, pedal_capture_rx) = mpsc::channel();
         let pedal_loudness = Arc::new(Mutex::new(None::<f32>));
-        let (amp_profile_tx, amp_profile_rx) = mpsc::channel();
+        let (amp_capture_tx, amp_capture_rx) = mpsc::channel();
         let amp_loudness = Arc::new(Mutex::new(None::<f32>));
         let (cab_tx, cab_rx) = mpsc::channel::<Option<CabConvolver>>();
 
@@ -174,15 +167,15 @@ impl AudioEngine {
         debug!(
             target: "pedal",
             "in={}dB out={}dB bypass={}",
-            params.pedal_in_gain_db,
-            params.pedal_out_gain_db,
+            params.pedal_input_db,
+            params.pedal_output_db,
             if params.pedal_bypass { "on" } else { "off" }
         );
         debug!(
             target: "amp",
             "in={}dB out={}dB bypass={}",
-            params.amp_in_gain_db,
-            params.amp_out_gain_db,
+            params.amp_input_db,
+            params.amp_output_db,
             if params.amp_bypass { "on" } else { "off" }
         );
         debug!(
@@ -206,13 +199,13 @@ impl AudioEngine {
         let initial_params = Params {
             gate_enabled: params.gate_enabled,
             gate_threshold_db: params.gate_threshold_db,
-            pedal_in_gain: db_to_gain(params.pedal_in_gain_db),
-            pedal_out_gain: db_to_gain(params.pedal_out_gain_db),
+            pedal_input_gain: db_to_gain(params.pedal_input_db),
+            pedal_output_gain: db_to_gain(params.pedal_output_db),
             pedal_bypass: params.pedal_bypass,
-            amp_in_gain: db_to_gain(params.amp_in_gain_db),
-            amp_out_gain: db_to_gain(params.amp_out_gain_db),
+            amp_input_gain: db_to_gain(params.amp_input_db),
+            amp_output_gain: db_to_gain(params.amp_output_db),
             amp_bypass: params.amp_bypass,
-            cab_level: db_to_gain(params.cab_level_db),
+            cab_level_gain: db_to_gain(params.cab_level_db),
             cab_bypass: params.cab_bypass,
             eq_enabled: params.eq_enabled,
             eq_pos: params.eq_pos,
@@ -248,10 +241,10 @@ impl AudioEngine {
         let processor = NamProcessor {
             mute: Arc::clone(&mute),
             gate: Gate::new(params.gate_threshold_db, sample_rate),
-            pedal_profile_rx,
-            current_pedal_profile: None,
-            amp_profile_rx,
-            current_amp_profile: None,
+            pedal_capture_rx,
+            current_pedal_capture: None,
+            amp_capture_rx,
+            current_amp_capture: None,
             cab_rx,
             current_cab: None,
             params: Arc::clone(&shared_params),
@@ -272,9 +265,9 @@ impl AudioEngine {
 
         let engine = AudioEngine {
             mute,
-            pedal_profile_tx,
+            pedal_capture_tx,
             pedal_loudness,
-            amp_profile_tx,
+            amp_capture_tx,
             amp_loudness,
             cab_tx,
             params: shared_params,
@@ -287,8 +280,8 @@ impl AudioEngine {
             event_rx: RefCell::new(Some(event_rx)),
         };
 
-        engine.load_pedal_profile(params.pedal_profile_path);
-        engine.load_amp_profile(params.amp_profile_path);
+        engine.load_pedal_capture(params.pedal_capture_path);
+        engine.load_amp_capture(params.amp_capture_path);
         engine.load_cab(params.cab_path);
         engine.set_input_device(params.input_device);
         engine.set_output_device(params.output_device);
@@ -336,26 +329,23 @@ impl AudioEngine {
 
         let sources = device::matching_ports(client, &device, PortFlags::IS_OUTPUT);
 
-        match sources.first() {
-            Some(source) => {
-                if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
-                    error!(
-                        target: "input",
-                        "state=error device={device} port={source} reason={e}"
-                    );
-                    let _ = self.event_tx.unbounded_send(EngineEvent::Warning(format!(
-                        "Input: failed to connect {source}"
-                    )));
-                } else {
-                    debug!(target: "input", "state=connected device={device} port={source}");
-                }
-            }
-            None => {
-                warn!(target: "input", "state=not_found device={device}");
+        if let Some(source) = sources.first() {
+            if let Err(e) = client.connect_ports_by_name(source, "namplay:input") {
+                error!(
+                    target: "input",
+                    "state=error device={device} port={source} reason={e}"
+                );
                 let _ = self.event_tx.unbounded_send(EngineEvent::Warning(format!(
-                    "Input: device not found: {device}"
+                    "Input: failed to connect {source}"
                 )));
+            } else {
+                debug!(target: "input", "state=connected device={device} port={source}");
             }
+        } else {
+            warn!(target: "input", "state=not_found device={device}");
+            let _ = self.event_tx.unbounded_send(EngineEvent::Warning(format!(
+                "Input: device not found: {device}"
+            )));
         }
     }
 
@@ -419,10 +409,10 @@ impl AudioEngine {
         self.params.lock().unwrap().gate_threshold_db = db;
     }
 
-    pub fn load_pedal_profile(&self, path: Option<String>) {
+    pub fn load_pedal_capture(&self, path: Option<String>) {
         nam::load(
-            ProfileKind::Pedal,
-            self.pedal_profile_tx.clone(),
+            CaptureKind::Pedal,
+            self.pedal_capture_tx.clone(),
             path,
             self.sample_rate,
             Arc::clone(&self.pedal_loudness),
@@ -430,14 +420,14 @@ impl AudioEngine {
         );
     }
 
-    pub fn set_pedal_in_gain_db(&self, db: f32) {
+    pub fn set_pedal_input_db(&self, db: f32) {
         debug!(target: "pedal", "in={db}dB");
-        self.params.lock().unwrap().pedal_in_gain = db_to_gain(db);
+        self.params.lock().unwrap().pedal_input_gain = db_to_gain(db);
     }
 
-    pub fn set_pedal_out_gain_db(&self, db: f32) {
+    pub fn set_pedal_output_db(&self, db: f32) {
         debug!(target: "pedal", "out={db}dB");
-        self.params.lock().unwrap().pedal_out_gain = db_to_gain(db);
+        self.params.lock().unwrap().pedal_output_gain = db_to_gain(db);
     }
 
     pub fn set_pedal_bypass(&self, bypassed: bool) {
@@ -445,10 +435,10 @@ impl AudioEngine {
         self.params.lock().unwrap().pedal_bypass = bypassed;
     }
 
-    pub fn load_amp_profile(&self, path: Option<String>) {
+    pub fn load_amp_capture(&self, path: Option<String>) {
         nam::load(
-            ProfileKind::Amp,
-            self.amp_profile_tx.clone(),
+            CaptureKind::Amp,
+            self.amp_capture_tx.clone(),
             path,
             self.sample_rate,
             Arc::clone(&self.amp_loudness),
@@ -456,14 +446,14 @@ impl AudioEngine {
         );
     }
 
-    pub fn set_amp_in_gain_db(&self, db: f32) {
+    pub fn set_amp_input_db(&self, db: f32) {
         debug!(target: "amp", "in={db}dB");
-        self.params.lock().unwrap().amp_in_gain = db_to_gain(db);
+        self.params.lock().unwrap().amp_input_gain = db_to_gain(db);
     }
 
-    pub fn set_amp_out_gain_db(&self, db: f32) {
+    pub fn set_amp_output_db(&self, db: f32) {
         debug!(target: "amp", "out={db}dB");
-        self.params.lock().unwrap().amp_out_gain = db_to_gain(db);
+        self.params.lock().unwrap().amp_output_gain = db_to_gain(db);
     }
 
     pub fn set_amp_bypass(&self, bypassed: bool) {
@@ -483,7 +473,7 @@ impl AudioEngine {
 
     pub fn set_cab_level_db(&self, db: f32) {
         debug!(target: "cab", "level={db}dB");
-        self.params.lock().unwrap().cab_level = db_to_gain(db);
+        self.params.lock().unwrap().cab_level_gain = db_to_gain(db);
     }
 
     pub fn set_cab_bypass(&self, bypassed: bool) {

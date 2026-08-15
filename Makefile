@@ -17,7 +17,7 @@ help:
 	@echo "clean      remove build artifacts"
 
 lint:
-	cargo clippy --all-targets -- -D warnings -D clippy::all
+	cargo clippy --all-targets -- -D warnings -D clippy::all -D clippy::pedantic
 
 update:
 	@test -f flatpak-cargo-generator.py || \

@@ -4,7 +4,7 @@ use libadwaita::{self as adw, prelude::*};
 use log::{debug, error};
 
 use super::show_persistent_toast;
-use crate::keys::*;
+use crate::keys::{COLLAPSE_ON_LAUNCH, NORMALIZE_OUTPUT, RUN_IN_BACKGROUND};
 use crate::APP_ID;
 
 const EXPANDER_ROW_IDS: &[&str] = &["gate_row", "eq_row", "pedal_row", "amp_row", "cab_row"];
@@ -38,14 +38,14 @@ pub fn setup_primary_menu(
         }
     });
 
-    let audio_window: adw::Window = builder.object("audio_window").expect("audio_window");
+    let settings_window: adw::Window = builder.object("settings_window").expect("settings_window");
     let settings_action = gio::ActionEntry::builder("settings")
         .activate(move |_: &adw::Application, _, _| {
-            audio_window.present();
+            settings_window.present();
         })
         .build();
 
-    let browse_action = gio::ActionEntry::builder("browse-profiles")
+    let browse_action = gio::ActionEntry::builder("browse-captures")
         .activate(|app: &adw::Application, _, _| {
             gtk4::UriLauncher::new("https://www.tone3000.com/search").launch(
                 app.active_window().as_ref(),
@@ -61,7 +61,7 @@ pub fn setup_primary_menu(
                 .application_name("Namplay")
                 .application_icon(APP_ID)
                 .version(env!("CARGO_PKG_VERSION"))
-                .comments("Run NAM profiles via PipeWire's JACK")
+                .comments("Play NAM captures via PipeWire's JACK")
                 .developer_name("hedgieinsocks")
                 .developers(["hedgieinsocks", "Claude"])
                 .license_type(gtk4::License::MitX11)

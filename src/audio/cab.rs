@@ -65,12 +65,12 @@ fn load_wav_samples(
         let _ = event_tx.unbounded_send(EngineEvent::Warning(format!("Cab: {detail}")));
     }
     let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(|s| s.ok()).collect(),
+        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
         hound::SampleFormat::Int => {
             let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
             reader
                 .samples::<i32>()
-                .filter_map(|s| s.ok())
+                .filter_map(Result::ok)
                 .map(|s| s as f32 / max)
                 .collect()
         }

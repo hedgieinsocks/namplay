@@ -60,40 +60,40 @@
 
     <key name="pedal-path" type="s">
       <default>''</default>
-      <summary>Path to the selected pedal profile file</summary>
+      <summary>Path to the selected pedal capture file</summary>
     </key>
     <key name="pedal-input" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
-      <summary>Pedal profile input gain in dB</summary>
+      <summary>Pedal capture input gain in dB</summary>
     </key>
     <key name="pedal-output" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
-      <summary>Pedal profile output gain in dB</summary>
+      <summary>Pedal capture output gain in dB</summary>
     </key>
     <key name="pedal-bypass" type="b">
       <default>false</default>
-      <summary>Pedal profile bypassed</summary>
+      <summary>Pedal capture bypassed</summary>
     </key>
 
     <key name="amp-path" type="s">
       <default>''</default>
-      <summary>Path to the selected amp profile file</summary>
+      <summary>Path to the selected amp capture file</summary>
     </key>
     <key name="amp-input" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
-      <summary>Amp profile input gain in dB</summary>
+      <summary>Amp capture input gain in dB</summary>
     </key>
     <key name="amp-output" type="d">
       <range min="-20" max="20"/>
       <default>0</default>
-      <summary>Amp profile output gain in dB</summary>
+      <summary>Amp capture output gain in dB</summary>
     </key>
     <key name="amp-bypass" type="b">
       <default>false</default>
-      <summary>Amp profile bypassed</summary>
+      <summary>Amp capture bypassed</summary>
     </key>
 
     <key name="cab-path" type="s">

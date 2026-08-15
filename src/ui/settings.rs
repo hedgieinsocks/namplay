@@ -6,7 +6,7 @@ use gio::prelude::*;
 use gtk4::prelude::*;
 
 use crate::audio::AudioEngine;
-use crate::keys::*;
+use crate::keys::{BUFFER_SIZE, INPUT_DEVICE, OUTPUT_DEVICE};
 
 const BUFFER_SIZES: &[u32] = &[16, 32, 64, 128, 192, 256, 320, 384, 448, 512];
 
@@ -15,7 +15,7 @@ pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Setti
         .object("buffer_size_dropdown")
         .expect("buffer_size_dropdown");
 
-    let labels: Vec<String> = BUFFER_SIZES.iter().map(|n| n.to_string()).collect();
+    let labels: Vec<String> = BUFFER_SIZES.iter().map(ToString::to_string).collect();
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
 
@@ -44,10 +44,13 @@ pub fn setup_buffer_size_dropdown(builder: &gtk4::Builder, settings: &gio::Setti
 }
 
 fn format_latency(buffer_size: u32, sample_rate: u32) -> String {
-    format!("{:.1}", buffer_size as f64 / sample_rate as f64 * 1000.0)
+    format!(
+        "{:.1}",
+        f64::from(buffer_size) / f64::from(sample_rate) * 1000.0
+    )
 }
 
-pub fn setup_audio_window(
+pub fn setup_settings_window(
     builder: &gtk4::Builder,
     settings: &gio::Settings,
     engine: &Rc<AudioEngine>,
@@ -106,10 +109,11 @@ fn setup_device_dropdown(
     engine: Rc<AudioEngine>,
     list_devices: fn(&AudioEngine) -> Vec<String>,
 ) {
+    const NONE_LABEL: &str = "None";
+
     let dropdown: gtk4::DropDown = builder.object(dropdown_id).expect(dropdown_id);
     let refresh_button: gtk4::Button = builder.object(refresh_button_id).expect(refresh_button_id);
 
-    const NONE_LABEL: &str = "None";
     let known: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
     let rebuild = {
@@ -117,7 +121,7 @@ fn setup_device_dropdown(
         let known = Rc::clone(&known);
         let settings = settings.clone();
         move |devices: Vec<String>| {
-            *known.borrow_mut() = devices.clone();
+            known.borrow_mut().clone_from(&devices);
 
             let current = settings.string(key).to_string();
             let model = gtk4::StringList::new(&[NONE_LABEL]);
@@ -167,7 +171,6 @@ fn selected_index(current: &str, devices: &[String]) -> u32 {
         devices
             .iter()
             .position(|d| d == current)
-            .map(|i| i as u32 + 1)
-            .unwrap_or(0)
+            .map_or(0, |i| i as u32 + 1)
     }
 }

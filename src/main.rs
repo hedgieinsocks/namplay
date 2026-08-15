@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
+
 mod audio;
 mod keys;
 mod preset;
@@ -16,12 +23,17 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use log::{debug, error};
 
-use audio::{AudioEngine, EngineEvent, EqPosition, InitialParams, ProfileKind};
-use keys::*;
+use audio::{AudioEngine, CaptureKind, EngineEvent, EqPosition, InitialParams};
+use keys::{
+    AMP_BYPASS, AMP_INPUT, AMP_OUTPUT, AMP_PATH, BUFFER_SIZE, CAB_BYPASS, CAB_LEVEL, CAB_PATH,
+    EQ_ENABLED, EQ_HIGH, EQ_HP, EQ_LOW, EQ_LP, EQ_MID, EQ_POSITION, GATE_ENABLED, GATE_THRESHOLD,
+    INPUT_DEVICE, MUTE, NORMALIZE_OUTPUT, OUTPUT_DEVICE, PEDAL_BYPASS, PEDAL_INPUT, PEDAL_OUTPUT,
+    PEDAL_PATH, TRAY_ICON,
+};
 use ui::{
-    bind_adjustment, bind_toggle, create_tuner_window, path_from_settings, restore_window_state,
-    save_window_state, setup_audio_window, setup_buffer_size_dropdown, setup_eq_position,
-    setup_file_picker_row, setup_preset_actions, setup_primary_menu, setup_reset_button,
+    bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
+    setup_buffer_size_dropdown, setup_eq_position, setup_file_picker_row, setup_preset_actions,
+    setup_primary_menu, setup_reset_button, setup_settings_window, setup_tuner_window,
     show_persistent_toast, FilePickerSpec,
 };
 
@@ -33,15 +45,15 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
     FilePickerSpec {
         prefix: "pedal",
         key: PEDAL_PATH,
-        title: "Choose Pedal Profile",
-        filter_name: "NAM Profiles",
+        title: "Choose Pedal capture",
+        filter_name: "NAM captures",
         filter_suffix: "nam",
     },
     FilePickerSpec {
         prefix: "amp",
         key: AMP_PATH,
-        title: "Choose Amp Profile",
-        filter_name: "NAM Profiles",
+        title: "Choose Amp capture",
+        filter_name: "NAM captures",
         filter_suffix: "nam",
     },
     FilePickerSpec {
@@ -62,10 +74,10 @@ const SLIDERS: &[(&str, SliderSetter)] = &[
     (EQ_MID, AudioEngine::set_eq_mid_db),
     (EQ_HIGH, AudioEngine::set_eq_high_db),
     (EQ_LP, AudioEngine::set_eq_lp_freq),
-    (PEDAL_INPUT, AudioEngine::set_pedal_in_gain_db),
-    (PEDAL_OUTPUT, AudioEngine::set_pedal_out_gain_db),
-    (AMP_INPUT, AudioEngine::set_amp_in_gain_db),
-    (AMP_OUTPUT, AudioEngine::set_amp_out_gain_db),
+    (PEDAL_INPUT, AudioEngine::set_pedal_input_db),
+    (PEDAL_OUTPUT, AudioEngine::set_pedal_output_db),
+    (AMP_INPUT, AudioEngine::set_amp_input_db),
+    (AMP_OUTPUT, AudioEngine::set_amp_output_db),
     (CAB_LEVEL, AudioEngine::set_cab_level_db),
 ];
 
@@ -107,6 +119,7 @@ fn main() {
     std::process::exit(app.run().into());
 }
 
+#[allow(clippy::too_many_lines)]
 fn build_ui(app: &adw::Application, start_hidden: bool) {
     if let Some(win) = app.active_window() {
         win.present();
@@ -121,8 +134,19 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
 
     restore_window_state(&win, &settings);
 
+    let pedal_capture_path = path_from_settings(&settings, PEDAL_PATH);
+    let amp_capture_path = path_from_settings(&settings, AMP_PATH);
+
+    let pedal_skip_normalize = Rc::new(Cell::new(pedal_capture_path.is_some()));
+    let amp_skip_normalize = Rc::new(Cell::new(amp_capture_path.is_some()));
+
     for spec in FILE_PICKERS {
-        setup_file_picker_row(&builder, &win, &settings, spec);
+        let skip_normalize = match spec.prefix {
+            "pedal" => Some(&pedal_skip_normalize),
+            "amp" => Some(&amp_skip_normalize),
+            _ => None,
+        };
+        setup_file_picker_row(&builder, &win, &settings, spec, skip_normalize);
     }
 
     bind_toggle(&builder, &settings, "gate_row", GATE_ENABLED);
@@ -139,12 +163,6 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
 
     let toast_overlay: adw::ToastOverlay = builder.object("toast_overlay").expect("toast_overlay");
 
-    let pedal_profile_path = path_from_settings(&settings, PEDAL_PATH);
-    let amp_profile_path = path_from_settings(&settings, AMP_PATH);
-
-    let pedal_skip_normalize = Rc::new(Cell::new(pedal_profile_path.is_some()));
-    let amp_skip_normalize = Rc::new(Cell::new(amp_profile_path.is_some()));
-
     match AudioEngine::new(InitialParams {
         input_device: path_from_settings(&settings, INPUT_DEVICE),
         output_device: path_from_settings(&settings, OUTPUT_DEVICE),
@@ -152,13 +170,13 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         mute: settings.boolean(MUTE),
         gate_enabled: settings.boolean(GATE_ENABLED),
         gate_threshold_db: settings.double(GATE_THRESHOLD) as f32,
-        pedal_profile_path: pedal_profile_path.clone(),
-        pedal_in_gain_db: settings.double(PEDAL_INPUT) as f32,
-        pedal_out_gain_db: settings.double(PEDAL_OUTPUT) as f32,
+        pedal_capture_path: pedal_capture_path.clone(),
+        pedal_input_db: settings.double(PEDAL_INPUT) as f32,
+        pedal_output_db: settings.double(PEDAL_OUTPUT) as f32,
         pedal_bypass: settings.boolean(PEDAL_BYPASS),
-        amp_profile_path: amp_profile_path.clone(),
-        amp_in_gain_db: settings.double(AMP_INPUT) as f32,
-        amp_out_gain_db: settings.double(AMP_OUTPUT) as f32,
+        amp_capture_path: amp_capture_path.clone(),
+        amp_input_db: settings.double(AMP_INPUT) as f32,
+        amp_output_db: settings.double(AMP_OUTPUT) as f32,
         amp_bypass: settings.boolean(AMP_BYPASS),
         cab_path: path_from_settings(&settings, CAB_PATH),
         cab_level_db: settings.double(CAB_LEVEL) as f32,
@@ -173,7 +191,7 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     }) {
         Ok(engine) => {
             let engine = Rc::new(engine);
-            setup_audio_window(&builder, &settings, &engine);
+            setup_settings_window(&builder, &settings, &engine);
 
             setup_toggle_button(&builder, &settings, "mute_button", MUTE);
             setup_toggle_button(&builder, &settings, "pedal_bypass_button", PEDAL_BYPASS);
@@ -195,7 +213,7 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                 .borrow_mut()
                 .take()
                 .expect("tuner receiver already taken");
-            let tuner_window = create_tuner_window(&builder, tuner_hz_rx);
+            let tuner_window = setup_tuner_window(&builder, tuner_hz_rx);
 
             let tuner_action = gio::ActionEntry::builder("tuner")
                 .activate({
@@ -251,14 +269,14 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                     while let Some(event) = event_rx.next().await {
                         match event {
                             EngineEvent::Warning(msg) => {
-                                show_persistent_toast(&toast_overlay, &msg)
+                                show_persistent_toast(&toast_overlay, &msg);
                             }
-                            EngineEvent::ProfileLoaded(kind) => {
+                            EngineEvent::CaptureLoaded(kind) => {
                                 let (loudness, key, skip_normalize) = match kind {
-                                    ProfileKind::Pedal => {
+                                    CaptureKind::Pedal => {
                                         (&pedal_loudness, PEDAL_OUTPUT, &pedal_skip_normalize)
                                     }
-                                    ProfileKind::Amp => {
+                                    CaptureKind::Amp => {
                                         (&amp_loudness, AMP_OUTPUT, &amp_skip_normalize)
                                     }
                                 };
@@ -284,15 +302,15 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
                     BUFFER_SIZE => engine.set_buffer_size(s.int(key) as u32),
                     MUTE => engine.set_mute(s.boolean(key)),
                     GATE_ENABLED => engine.set_gate_enabled(s.boolean(key)),
-                    PEDAL_PATH => engine.load_pedal_profile(path_from_settings(s, key)),
+                    PEDAL_PATH => engine.load_pedal_capture(path_from_settings(s, key)),
                     PEDAL_BYPASS => engine.set_pedal_bypass(s.boolean(key)),
-                    AMP_PATH => engine.load_amp_profile(path_from_settings(s, key)),
+                    AMP_PATH => engine.load_amp_capture(path_from_settings(s, key)),
                     AMP_BYPASS => engine.set_amp_bypass(s.boolean(key)),
                     CAB_PATH => engine.load_cab(path_from_settings(s, key)),
                     CAB_BYPASS => engine.set_cab_bypass(s.boolean(key)),
                     EQ_ENABLED => engine.set_eq_enabled(s.boolean(key)),
                     EQ_POSITION => {
-                        engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()))
+                        engine.set_eq_pos(EqPosition::from_setting(s.string(key).as_str()));
                     }
                     _ => {}
                 }
@@ -449,7 +467,7 @@ fn setup_tray(
 }
 
 fn normalize_gain_db(loudness: f32) -> f64 {
-    preset::round1(TARGET_LOUDNESS_DBFS - loudness as f64).clamp(-20.0, 20.0)
+    preset::round1(TARGET_LOUDNESS_DBFS - f64::from(loudness)).clamp(-20.0, 20.0)
 }
 
 fn apply_normalize(settings: &gio::Settings, loudness: &Mutex<Option<f32>>, key: &str) {

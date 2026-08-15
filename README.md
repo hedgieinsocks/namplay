@@ -2,19 +2,18 @@
 
 # Namplay
 
-GTK4/Libadwaita app to run A2 [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) profiles via PipeWire's JACK
+GTK4/Libadwaita standalone app to load and play A2 [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) captures via PipeWire's JACK
 
 ![Screenshot](assets/screenshot.png)
 
 ## ✨ Features
 
-* Noise Gate
+* 2 NAM slots for Pedal & Amp/Rig captures
+* Impulse Response Cab slot
 * 3-band EQ with High/Low Pass
-* Pedal NAM Profile
-* Amp/Rig NAM Profile
-* Impulse Response Cab
-* Presets
+* Noise Gate
 * Tuner
+* Save and load Presets
 * Input & Output selector
 * Headless mode
 
@@ -52,13 +51,13 @@ sudo pacman -S pipewire-jack
 ## 📥 Installation
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.7.4/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.7.5/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 
 ## 🔧 Configuration
 
-Namplay does not feature a resampler (yet) so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for impulse responses and .nam profiles. As for the buffer size, it can be adjusted from Namplay's Audio Settings.
+Namplay does not feature a resampler so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for .wav impulse responses and .nam captures. As for the buffer size, it can be adjusted from Namplay's Settings.
 
 ```sh
 cat ~/.config/pipewire/jack.conf.d/jack.conf

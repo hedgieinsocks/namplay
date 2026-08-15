@@ -140,8 +140,8 @@ menu primary_menu {
 
   section {
     item {
-      label: "Browse profiles";
-      action: "app.browse-profiles";
+      label: "Browse captures";
+      action: "app.browse-captures";
     }
 
     item {
@@ -151,8 +151,8 @@ menu primary_menu {
   }
 }
 
-Adw.Window audio_window {
-  title: "Audio Settings";
+Adw.Window settings_window {
+  title: "Settings";
   transient-for: window;
   default-width: 500;
   default-height: 400;
@@ -283,7 +283,7 @@ Adw.ApplicationWindow window {
         [start]
         Gtk.ToggleButton mute_button {
           icon-name: "audio-volume-high-symbolic";
-          tooltip-text: "Mute";
+          tooltip-text: "Toggle Mute";
         }
 
         [end]
@@ -599,7 +599,7 @@ Adw.ApplicationWindow window {
             Gtk.Button pedal_button {
               valign: center;
               icon-name: "document-open-symbolic";
-              tooltip-text: "Choose pedal profile file";
+              tooltip-text: "Choose pedal capture file";
 
               styles [
                 "flat",
@@ -640,7 +640,7 @@ Adw.ApplicationWindow window {
 
                 Gtk.ToggleButton pedal_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
-                  tooltip-text: "Bypass";
+                  tooltip-text: "Toggle Bypass";
                 }
 
                 Gtk.Button pedal_input_reset_button {
@@ -737,7 +737,7 @@ Adw.ApplicationWindow window {
             Gtk.Button amp_button {
               valign: center;
               icon-name: "document-open-symbolic";
-              tooltip-text: "Choose amp profile file";
+              tooltip-text: "Choose amp capture file";
 
               styles [
                 "flat",
@@ -778,7 +778,7 @@ Adw.ApplicationWindow window {
 
                 Gtk.ToggleButton amp_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
-                  tooltip-text: "Bypass";
+                  tooltip-text: "Toggle Bypass";
                 }
 
                 Gtk.Button amp_input_reset_button {
@@ -916,7 +916,7 @@ Adw.ApplicationWindow window {
 
                 Gtk.ToggleButton cab_bypass_button {
                   icon-name: "audio-volume-high-symbolic";
-                  tooltip-text: "Bypass";
+                  tooltip-text: "Toggle Bypass";
                 }
 
                 Gtk.Button cab_level_reset_button {

@@ -98,6 +98,7 @@ impl EqCoeffs {
         coeffs
     }
 
+    #[allow(clippy::float_cmp)]
     pub(super) fn update(
         &mut self,
         low_db: f32,

@@ -13,7 +13,7 @@ pub(super) struct Gate {
     hold_samples: u32,
     envelope: f32,
     gain: f32,
-    gate_open: bool,
+    is_open: bool,
     hold_counter: u32,
     last_threshold_db: f32,
 }
@@ -29,12 +29,13 @@ impl Gate {
             hold_samples: (HOLD_TIME_S * sr) as u32,
             envelope: 0.0,
             gain: 0.0,
-            gate_open: false,
+            is_open: false,
             hold_counter: 0,
             last_threshold_db: threshold_db,
         }
     }
 
+    #[allow(clippy::float_cmp)]
     pub(super) fn update(&mut self, threshold_db: f32) {
         if threshold_db != self.last_threshold_db {
             self.open_threshold = db_to_gain(threshold_db);
@@ -52,20 +53,20 @@ impl Gate {
         };
         self.envelope = env_coeff * self.envelope + (1.0 - env_coeff) * abs;
 
-        if self.gate_open {
+        if self.is_open {
             if self.envelope > self.open_threshold {
                 self.hold_counter = self.hold_samples;
             } else if self.hold_counter > 0 {
                 self.hold_counter -= 1;
             } else if self.envelope < self.close_threshold {
-                self.gate_open = false;
+                self.is_open = false;
             }
         } else if self.envelope > self.open_threshold {
-            self.gate_open = true;
+            self.is_open = true;
             self.hold_counter = self.hold_samples;
         }
 
-        let target = if self.gate_open { 1.0_f32 } else { 0.0 };
+        let target = if self.is_open { 1.0_f32 } else { 0.0 };
         let gain_coeff = if target > self.gain {
             self.attack_coeff
         } else {

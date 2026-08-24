@@ -5,3 +5,4 @@ Exec=namplay
 Icon=io.github.hedgieinsocks.Namplay
 Type=Application
 Categories=AudioVideo;Audio;Music;
+DBusActivatable=true

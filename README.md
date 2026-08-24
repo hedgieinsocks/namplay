@@ -51,7 +51,7 @@ sudo pacman -S pipewire-jack
 ## 📥 Installation
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.7.5/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.8.0/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 
@@ -75,5 +75,5 @@ jack.properties = {
 This project is mainly vibe-coded with the help of Claude for my personal use. I'm not an audio engineer and don't write in rust, but I use my knowledge of other programming languages to keep it as simple and tight as possible. So far it meets my humble aesthetical and functional needs. Hopefully, you will find it useful as well.
 
 * inspired by https://github.com/brummer10/NeuralRack
-* made possible with https://github.com/OpenSauce/nam-rs
+* made possible with https://github.com/fabiohl/NeuralAmpModeler-rs
 * icon by [Freepik](https://www.flaticon.com/authors/freepik) from [Flaticon](https://www.flaticon.com/)

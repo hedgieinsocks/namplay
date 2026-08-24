@@ -16,7 +16,6 @@ use std::sync::{
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use jack::{AudioIn, AudioOut, Client, ClientOptions, PortFlags};
 use log::{debug, error, warn};
-use nam_rs::Model;
 
 const MAX_BLOCK_SIZE: usize = 8192;
 
@@ -24,6 +23,7 @@ use cab::CabConvolver;
 pub use eq::EqPosition;
 use eq::{EqChannel, EqCoeffs};
 use gate::Gate;
+use nam::Capture;
 pub use nam::CaptureKind;
 pub(crate) use processor::Params;
 use processor::{NamProcessor, Notifications};
@@ -104,9 +104,9 @@ pub struct InitialParams {
 
 pub struct AudioEngine {
     pub mute: Arc<AtomicBool>,
-    pedal_capture_tx: mpsc::Sender<Option<Model>>,
+    pedal_capture_tx: mpsc::Sender<Option<Capture>>,
     pub pedal_loudness: Arc<Mutex<Option<f32>>>,
-    amp_capture_tx: mpsc::Sender<Option<Model>>,
+    amp_capture_tx: mpsc::Sender<Option<Capture>>,
     pub amp_loudness: Arc<Mutex<Option<f32>>>,
     cab_tx: mpsc::Sender<Option<CabConvolver>>,
     params: Arc<Mutex<Params>>,

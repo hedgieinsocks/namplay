@@ -33,8 +33,9 @@ use keys::{
 use ui::{
     bind_adjustment, bind_toggle, path_from_settings, restore_window_state, save_window_state,
     setup_buffer_size_dropdown, setup_eq_position, setup_file_picker_row, setup_preset_actions,
-    setup_primary_menu, setup_reset_button, setup_settings_window, setup_tuner_window,
-    show_persistent_toast, FilePickerSpec,
+    setup_preset_row, setup_primary_menu, setup_reset_button, setup_settings_window,
+    setup_tuner_window, show_persistent_toast, FilePickerSpec, CAB_FILTER_SUFFIX,
+    NAM_FILTER_SUFFIX,
 };
 
 pub(crate) const APP_ID: &str = "io.github.hedgieinsocks.Namplay";
@@ -47,21 +48,21 @@ const FILE_PICKERS: &[FilePickerSpec] = &[
         key: PEDAL_PATH,
         title: "Choose Pedal capture",
         filter_name: "NAM captures",
-        filter_suffix: "nam",
+        filter_suffix: NAM_FILTER_SUFFIX,
     },
     FilePickerSpec {
         prefix: "amp",
         key: AMP_PATH,
         title: "Choose Amp capture",
         filter_name: "NAM captures",
-        filter_suffix: "nam",
+        filter_suffix: NAM_FILTER_SUFFIX,
     },
     FilePickerSpec {
         prefix: "cab",
         key: CAB_PATH,
         title: "Choose Cabinet IR",
         filter_name: "WAV Files",
-        filter_suffix: "wav",
+        filter_suffix: CAB_FILTER_SUFFIX,
     },
 ];
 
@@ -146,7 +147,7 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
             "amp" => Some(&amp_skip_normalize),
             _ => None,
         };
-        setup_file_picker_row(&builder, &win, &settings, spec, skip_normalize);
+        setup_file_picker_row(&builder, &win, &settings, app, spec, skip_normalize);
     }
 
     bind_toggle(&builder, &settings, "gate_row", GATE_ENABLED);
@@ -197,6 +198,10 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
             setup_toggle_button(&builder, &settings, "pedal_bypass_button", PEDAL_BYPASS);
             setup_toggle_button(&builder, &settings, "amp_bypass_button", AMP_BYPASS);
             setup_toggle_button(&builder, &settings, "cab_bypass_button", CAB_BYPASS);
+
+            app.add_action(&settings.create_action(PEDAL_BYPASS));
+            app.add_action(&settings.create_action(AMP_BYPASS));
+            app.add_action(&settings.create_action(CAB_BYPASS));
 
             setup_tray(
                 app,
@@ -335,6 +340,15 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
     });
 
     setup_primary_menu(app, &builder, &settings, &toast_overlay);
+
+    setup_preset_row(
+        &builder,
+        &settings,
+        app,
+        &toast_overlay,
+        &pedal_skip_normalize,
+        &amp_skip_normalize,
+    );
 
     setup_preset_actions(
         &builder,

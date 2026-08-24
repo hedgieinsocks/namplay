@@ -6,6 +6,7 @@ pub const RUN_IN_BACKGROUND: &str = "run-in-background";
 pub const TRAY_ICON: &str = "tray-icon";
 pub const NORMALIZE_OUTPUT: &str = "normalize-output";
 pub const MUTE: &str = "mute";
+pub const PRESET_PATH: &str = "preset-path";
 
 pub const INPUT_DEVICE: &str = "input-device";
 pub const OUTPUT_DEVICE: &str = "output-device";

@@ -128,18 +128,6 @@ menu primary_menu {
 
   section {
     item {
-      label: "Save preset";
-      action: "app.save-preset";
-    }
-
-    item {
-      label: "Load preset";
-      action: "app.load-preset";
-    }
-  }
-
-  section {
-    item {
       label: "Browse captures";
       action: "app.browse-captures";
     }
@@ -297,6 +285,57 @@ Adw.ApplicationWindow window {
 
       content: Adw.PreferencesPage {
         Adw.PreferencesGroup {
+          Adw.ActionRow preset_row {
+            title: "Preset";
+            subtitle: "No preset loaded";
+
+            [suffix]
+            Gtk.Button preset_load_button {
+              valign: center;
+              icon-name: "document-open-symbolic";
+              tooltip-text: "Choose preset file";
+              action-name: "app.load-preset";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button preset_prev_button {
+              valign: center;
+              icon-name: "go-previous-symbolic";
+              tooltip-text: "Load previous preset in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button preset_next_button {
+              valign: center;
+              icon-name: "go-next-symbolic";
+              tooltip-text: "Load next preset in directory";
+
+              styles [
+                "flat",
+              ]
+            }
+
+            [suffix]
+            Gtk.Button preset_save_button {
+              valign: center;
+              icon-name: "document-save-symbolic";
+              tooltip-text: "Save preset";
+              action-name: "app.save-preset";
+
+              styles [
+                "flat",
+              ]
+            }
+          }
+
           Adw.ExpanderRow gate_row {
             title: "Gate";
             subtitle: "Suppress the signal below a threshold";

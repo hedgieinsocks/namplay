@@ -10,6 +10,10 @@ use log::debug;
 
 use super::path_from_settings;
 
+pub const NAM_FILTER_SUFFIX: &str = "nam";
+pub const CAB_FILTER_SUFFIX: &str = "wav";
+pub(crate) const PRESET_FILTER_SUFFIX: &str = "yaml";
+
 pub struct FilePickerSpec {
     pub prefix: &'static str,
     pub key: &'static str,
@@ -18,7 +22,7 @@ pub struct FilePickerSpec {
     pub filter_suffix: &'static str,
 }
 
-fn list_sibling_files(path: &str, suffix: &str) -> Vec<PathBuf> {
+pub(crate) fn list_sibling_files(path: &str, suffix: &str) -> Vec<PathBuf> {
     let dir = match Path::new(path).parent() {
         Some(d) if !d.as_os_str().is_empty() => d,
         _ => Path::new("."),
@@ -40,26 +44,33 @@ fn list_sibling_files(path: &str, suffix: &str) -> Vec<PathBuf> {
     files
 }
 
-fn sibling_path(current: &str, suffix: &str, offset: isize) -> Option<String> {
+pub(crate) fn sibling_path(current: &str, suffix: &str, offset: isize) -> Option<String> {
     let files = list_sibling_files(current, suffix);
-    let index = files.iter().position(|p| p == Path::new(current))?;
-    let new_index = index as isize + offset;
-    if new_index < 0 || new_index as usize >= files.len() {
+    if files.is_empty() {
         return None;
     }
+    let index = files.iter().position(|p| p == Path::new(current))?;
+    let len = files.len() as isize;
+    let new_index = (index as isize + offset).rem_euclid(len);
     files[new_index as usize].to_str().map(String::from)
 }
 
-fn update_nav_buttons(prev: &gtk4::Button, next: &gtk4::Button, path: &str, suffix: &str) {
+pub(crate) fn update_nav_buttons(
+    prev: &gtk4::Button,
+    next: &gtk4::Button,
+    path: &str,
+    suffix: &str,
+) {
     if path.is_empty() {
         prev.set_sensitive(false);
         next.set_sensitive(false);
         return;
     }
     let files = list_sibling_files(path, suffix);
-    if let Some(index) = files.iter().position(|p| p == Path::new(path)) {
-        prev.set_sensitive(index > 0);
-        next.set_sensitive(index + 1 < files.len());
+    if files.iter().any(|p| p == Path::new(path)) {
+        let has_siblings = files.len() > 1;
+        prev.set_sensitive(has_siblings);
+        next.set_sensitive(has_siblings);
     } else {
         debug!(target: "nav", "state=not_found path={path} siblings={}", files.len());
         prev.set_sensitive(false);
@@ -71,6 +82,7 @@ pub fn setup_file_picker_row(
     builder: &gtk4::Builder,
     win: &adw::ApplicationWindow,
     settings: &gio::Settings,
+    app: &adw::Application,
     spec: &FilePickerSpec,
     skip_normalize: Option<&Rc<Cell<bool>>>,
 ) {
@@ -155,6 +167,20 @@ pub fn setup_file_picker_row(
     };
     connect_nav(&prev_button, -1);
     connect_nav(&next_button, 1);
+
+    let prev_action = gio::ActionEntry::builder(&format!("{}-prev", spec.prefix))
+        .activate({
+            let prev_button = prev_button.clone();
+            move |_: &adw::Application, _, _| prev_button.emit_clicked()
+        })
+        .build();
+    let next_action = gio::ActionEntry::builder(&format!("{}-next", spec.prefix))
+        .activate({
+            let next_button = next_button.clone();
+            move |_: &adw::Application, _, _| next_button.emit_clicked()
+        })
+        .build();
+    app.add_action_entries([prev_action, next_action]);
 
     settings.connect_changed(Some(spec.key), move |s, key| {
         let current_path = s.string(key);

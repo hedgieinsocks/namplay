@@ -1,19 +1,26 @@
 use std::collections::VecDeque;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, mpsc, Arc, Mutex};
 
-use fft_convolver::FFTConvolver;
 use jack::{AudioIn, AudioOut, Client, Control, NotificationHandler, ProcessHandler, ProcessScope};
 use log::warn;
-use nam_rs::Model;
+use neural_amp_modeler_rs::math::common::set_daz_ftz;
+use neural_amp_modeler_rs::models::NamModel;
 
 use super::cab::CabConvolver;
 use super::eq::{EqChannel, EqCoeffs};
 use super::gate::Gate;
+use super::nam::Capture;
 use super::EqPosition;
 
 pub(super) struct Notifications;
 
 impl NotificationHandler for Notifications {
+    fn thread_init(&self, _: &Client) {
+        // MXCSR is per-thread; the DSP core requires DAZ/FTZ set on every
+        // audio thread that calls NamModel::process directly (bypassing its pipeline).
+        unsafe { set_daz_ftz() };
+    }
+
     fn xrun(&mut self, _: &Client) -> Control {
         warn!(target: "jack", "xrun (buffer under/overrun)");
         Control::Continue
@@ -45,12 +52,12 @@ pub(crate) struct Params {
 pub(super) struct NamProcessor {
     pub(super) mute: Arc<AtomicBool>,
     pub(super) gate: Gate,
-    pub(super) pedal_capture_rx: mpsc::Receiver<Option<Model>>,
-    pub(super) current_pedal_capture: Option<Model>,
-    pub(super) amp_capture_rx: mpsc::Receiver<Option<Model>>,
-    pub(super) current_amp_capture: Option<Model>,
+    pub(super) pedal_capture_rx: mpsc::Receiver<Option<Capture>>,
+    pub(super) current_pedal_capture: Option<Capture>,
+    pub(super) amp_capture_rx: mpsc::Receiver<Option<Capture>>,
+    pub(super) current_amp_capture: Option<Capture>,
     pub(super) cab_rx: mpsc::Receiver<Option<CabConvolver>>,
-    pub(super) current_cab: Option<FFTConvolver<f32>>,
+    pub(super) current_cab: Option<CabConvolver>,
     pub(super) params: Arc<Mutex<Params>>,
     pub(super) last_params: Params,
     pub(super) eq_coeffs: EqCoeffs,
@@ -67,6 +74,20 @@ fn apply_gain(buf: &mut [f32], gain: f32) {
     for s in buf {
         *s *= gain;
     }
+}
+
+fn apply_capture(
+    capture: &mut Capture,
+    conv_buf: &mut [f32],
+    out_l: &mut [f32],
+    gains: (f32, f32),
+) {
+    let (input_gain, output_gain) = gains;
+    apply_gain(out_l, input_gain);
+    let n = out_l.len().min(conv_buf.len());
+    conv_buf[..n].copy_from_slice(&out_l[..n]);
+    capture.process(&conv_buf[..n], &mut out_l[..n]);
+    apply_gain(out_l, output_gain);
 }
 
 impl ProcessHandler for NamProcessor {
@@ -149,9 +170,8 @@ impl ProcessHandler for NamProcessor {
 
         if !p.pedal_bypass {
             if let Some(pedal) = &mut self.current_pedal_capture {
-                apply_gain(out_l, p.pedal_input_gain);
-                pedal.process_buffer(out_l);
-                apply_gain(out_l, p.pedal_output_gain);
+                let gains = (p.pedal_input_gain, p.pedal_output_gain);
+                apply_capture(pedal, &mut self.conv_buf, out_l, gains);
             }
         }
 
@@ -161,9 +181,8 @@ impl ProcessHandler for NamProcessor {
 
         if !p.amp_bypass {
             if let Some(amp) = &mut self.current_amp_capture {
-                apply_gain(out_l, p.amp_input_gain);
-                amp.process_buffer(out_l);
-                apply_gain(out_l, p.amp_output_gain);
+                let gains = (p.amp_input_gain, p.amp_output_gain);
+                apply_capture(amp, &mut self.conv_buf, out_l, gains);
             }
         }
 
@@ -176,7 +195,7 @@ impl ProcessHandler for NamProcessor {
         if !p.cab_bypass {
             if let Some(cab) = &mut self.current_cab {
                 self.conv_buf[..n].copy_from_slice(&out_l[..n]);
-                let _ = cab.process(&self.conv_buf[..n], &mut out_l[..n]);
+                cab.process_variable(&self.conv_buf[..n], &mut out_l[..n], None);
                 apply_gain(&mut out_l[..n], p.cab_level_gain);
             }
         }

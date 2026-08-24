@@ -16,6 +16,7 @@ GTK4/Libadwaita standalone app to load and play A2 [Neural Amp Modeler](https://
 * Save and load Presets
 * Input & Output selector
 * Headless mode
+* Remote control
 
 ## 🎯 Goals
 
@@ -51,7 +52,7 @@ sudo pacman -S pipewire-jack
 ## 📥 Installation
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.8.0/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.9.0/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 
@@ -64,6 +65,21 @@ cat ~/.config/pipewire/jack.conf.d/jack.conf
 jack.properties = {
   node.latency = 256/48000
 }
+```
+
+## 🔘 Remote control
+
+You can specify `--server` flag to instuct the app to spawn an HTTP server that will allow you to use your smaprtphone as a minimalistic pedal e.g.:
+
+* Toggle pedal bypass: http://192.168.0.110:8080/?mode=toggle?action=pedal-bypass
+* Switch to the next amp capture: http://192.168.0.110:8080/?action=amp-next
+
+For the full list of available commands, run the following.
+
+```sh
+gdbus call --session --dest io.github.hedgieinsocks.Namplay \
+  --object-path /io/github/hedgieinsocks/Namplay \
+  --method org.gtk.Actions.List
 ```
 
 ## 📜 License

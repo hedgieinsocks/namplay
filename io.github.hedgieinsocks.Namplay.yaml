@@ -9,6 +9,7 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
+  - --share=network
   - --filesystem=xdg-run/pipewire-0
   - --filesystem=home
   - --talk-name=org.kde.StatusNotifierWatcher

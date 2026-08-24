@@ -8,6 +8,7 @@
 mod audio;
 mod keys;
 mod preset;
+mod server;
 mod tray;
 mod ui;
 
@@ -21,7 +22,7 @@ use std::sync::{
 use gio::prelude::*;
 use gtk4::prelude::*;
 use libadwaita as adw;
-use log::{debug, error};
+use log::{debug, error, warn};
 
 use audio::{AudioEngine, CaptureKind, EngineEvent, EqPosition, InitialParams};
 use keys::{
@@ -105,23 +106,35 @@ fn main() {
         None,
     );
 
+    app.add_main_option(
+        "server",
+        glib::Char(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start an HTTP server to control the app remotely",
+        None,
+    );
+
     let start_hidden = Rc::new(Cell::new(false));
+    let start_server = Rc::new(Cell::new(false));
 
     app.connect_handle_local_options({
         let start_hidden = Rc::clone(&start_hidden);
+        let start_server = Rc::clone(&start_server);
         move |_app, options| {
             start_hidden.set(options.contains("background"));
+            start_server.set(options.contains("server"));
             std::ops::ControlFlow::Continue(())
         }
     });
 
-    app.connect_activate(move |app| build_ui(app, start_hidden.get()));
+    app.connect_activate(move |app| build_ui(app, start_hidden.get(), start_server.get()));
 
     std::process::exit(app.run().into());
 }
 
 #[allow(clippy::too_many_lines)]
-fn build_ui(app: &adw::Application, start_hidden: bool) {
+fn build_ui(app: &adw::Application, start_hidden: bool, start_server: bool) {
     if let Some(win) = app.active_window() {
         win.present();
         return;
@@ -358,6 +371,22 @@ fn build_ui(app: &adw::Application, start_hidden: bool) {
         pedal_skip_normalize,
         amp_skip_normalize,
     );
+
+    if start_server {
+        let (action_tx, mut action_rx) = futures_channel::mpsc::unbounded();
+        server::spawn(action_tx);
+        let app = app.clone();
+        glib::MainContext::default().spawn_local(async move {
+            use futures_util::StreamExt;
+            while let Some(name) = action_rx.next().await {
+                if app.has_action(&name) {
+                    app.activate_action(&name, None);
+                } else {
+                    warn!(target: "server", "state=unknown-action name={name}");
+                }
+            }
+        });
+    }
 
     if start_hidden {
         win.set_visible(false);

@@ -26,15 +26,6 @@ GTK4/Libadwaita standalone app to load and play A2 [Neural Amp Modeler](https://
 * [x] simple (no bloat features)
 * [x] lightweight (low CPU)
 * [x] pretty (fits GNOME desktop)
-* [ ] polished (no edge-case bugs)
-* [ ] discoverable (Flathub)
-
-From Flathub's [Generative AI Policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy):
-
-> Applications containing AI-generated or AI-assisted code, documentation, or any other content are not allowed.
-> Exceptions may be granted for mature, well-maintained projects.
-
-So if we get polished enough, eventually we can become discoverable!
 
 ## 🗃️ Dependencies
 
@@ -54,7 +45,7 @@ sudo pacman -S pipewire-jack
 Download and install the latest flatpak release artifact:
 
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.9.2/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.9.1/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 

@@ -38,7 +38,7 @@ So if we get polished enough, eventually we can become discoverable!
 
 ## 🗃️ Dependencies
 
-Namplay is built for `x86-64-v3` CPUs and relies on JACK implementation based on PipeWire.
+Namplay is built for `x86-64-v3` CPUs and relies on JACK implementation based on PipeWire:
 
 ```sh
 # Fedora
@@ -51,14 +51,16 @@ sudo pacman -S pipewire-jack
 
 ## 📥 Installation
 
+Download and install the latest flatpak release artifact:
+
 ```sh
-curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.9.0/io.github.hedgieinsocks.Namplay.flatpak
+curl -sLO https://github.com/hedgieinsocks/namplay/releases/download/v0.9.2/io.github.hedgieinsocks.Namplay.flatpak
 flatpak install --user io.github.hedgieinsocks.Namplay.flatpak
 ```
 
 ## 🔧 Configuration
 
-Namplay does not feature a resampler so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for .wav impulse responses and .nam captures. As for the buffer size, it can be adjusted from Namplay's Settings.
+Namplay does not feature a resampler so you should ensure PipeWire's JACK sample rate is set to 48000Hz, which is the most common value for .wav impulse responses and .nam captures:
 
 ```sh
 cat ~/.config/pipewire/jack.conf.d/jack.conf
@@ -67,14 +69,16 @@ jack.properties = {
 }
 ```
 
+As for the buffer size, it can be adjusted from Namplay's Settings.
+
 ## 🔘 Remote control
 
-You can specify `--server` flag to instuct the app to spawn an HTTP server that will allow you to use your smaprtphone as a minimalistic pedal e.g.:
+Use `--server` flag to spawn an HTTP server to serve a page with a simple full screen button that will allow you to use your smaprtphone as a footswitch:
 
 * Toggle pedal bypass: http://192.168.0.110:8080/?mode=toggle?action=pedal-bypass
 * Switch to the next amp capture: http://192.168.0.110:8080/?action=amp-next
 
-For the full list of available commands, run the following.
+For the full list of available actions, run the following command:
 
 ```sh
 gdbus call --session --dest io.github.hedgieinsocks.Namplay \
